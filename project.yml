@@ -1,0 +1,53 @@
+name: ReceiptlyNative
+
+packages:
+  SwiftUIX:
+    url: https://github.com/SwiftUIX/SwiftUIX
+    from: 0.2.3
+
+options:
+  bundleIdPrefix: com.utkoleg
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "16"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+
+targets:
+  ReceiptlyNative:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: ReceiptlyNative
+        excludes:
+          - Resources/Info.plist
+    resources:
+      - ReceiptlyNative/Resources
+    info:
+      path: ReceiptlyNative/Resources/Info.plist
+      properties:
+        CFBundleName: Marty
+        CFBundleDisplayName: Marty
+        CFBundleIdentifier: com.utkoleg.receiptly
+        CFBundleVersion: "1"
+        CFBundleShortVersionString: "2.0"
+        LSRequiresIPhoneOS: true
+        UILaunchStoryboardName: LaunchScreen
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        NSCameraUsageDescription: "Marty needs camera access to scan receipts."
+        NSPhotoLibraryUsageDescription: "Marty needs photo library access to import receipt images."
+        UIUserInterfaceStyle: Light
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    dependencies:
+      - package: SwiftUIX
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.utkoleg.receiptly
+        INFOPLIST_FILE: ReceiptlyNative/Resources/Info.plist
