@@ -42,7 +42,6 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         NSCameraUsageDescription: "Marty needs camera access to scan receipts."
         NSPhotoLibraryUsageDescription: "Marty needs photo library access to import receipt images."
-        UIUserInterfaceStyle: Light
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
     dependencies:
@@ -51,3 +50,15 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.utkoleg.receiptly
         INFOPLIST_FILE: ReceiptlyNative/Resources/Info.plist
+  ReceiptlyNativeTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - ReceiptlyNativeTests
+    dependencies:
+      - target: ReceiptlyNative
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.utkoleg.receiptly.tests

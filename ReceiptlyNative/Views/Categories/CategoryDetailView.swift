@@ -10,137 +10,135 @@ struct CatDetailRow: Identifiable {
 struct CategoryDetailView: View {
     let category: String
     let expenses: [Expense]
-    var onBack: () -> Void
     var onExpensePress: (Expense, String) -> Void
     var onDeletePress: (String) -> Void
 
-    private var ci: CategoryInfo { categoryInfo(for: category) }
+    private var categoryInfoValue: CategoryInfo { categoryInfo(for: category) }
 
-    private var catExpenses: [Expense] {
-        expenses.filter { e in
-            e.category == category || e.groups?.contains { $0.category == category } == true
+    private var categoryExpenses: [Expense] {
+        expenses.filter { expense in
+            expense.category == category || expense.groups?.contains { $0.category == category } == true
         }
     }
 
     private var rows: [CatDetailRow] {
-        catExpenses.map { e in
+        categoryExpenses.map { expense in
             let items: [ExpenseItem]
-            if let groups = e.groups {
+            if let groups = expense.groups {
                 items = groups.first { $0.category == category }?.items ?? []
             } else {
-                items = e.items
+                items = expense.items
             }
             let total = items.reduce(0) { $0 + $1.price }
-            return CatDetailRow(id: e.id, expense: e, items: items, total: total)
+            return CatDetailRow(id: expense.id, expense: expense, items: items, total: total)
+        }
+        .sorted { $0.expense.date > $1.expense.date }
+    }
+
+    private var categoryTotal: Double {
+        rows.reduce(0) { partial, row in
+            partial + (row.expense.convertedAmount(for: row.total) ?? row.total)
         }
     }
 
-    private var catTotal: Double { rows.reduce(0) { $0 + $1.total } }
-    private var totalItems: Int  { rows.reduce(0) { $0 + $1.items.count } }
+    private var totalItems: Int {
+        rows.reduce(0) { $0 + $1.items.count }
+    }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                Button(action: onBack) {
-                    HStack(spacing: 6) {
-                        Text("‹").font(.system(size: 16))
-                        Text("Back")
-                    }
-                    .font(.system(size: 14))
-                    .foregroundColor(AppColor.text)
-                    .padding(.horizontal, 16).padding(.vertical, 9)
-                    .cardStyle()
-                }
-                .buttonStyle(.plain)
-                .padding(.bottom, 20)
+        List {
+            Section {
+                CategorySummaryCard(
+                    category: category,
+                    info: categoryInfoValue,
+                    total: categoryTotal,
+                    itemCount: totalItems,
+                    receiptCount: rows.count
+                )
+                .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 8, trailing: 20))
+                .listRowBackground(Color.clear)
+            }
 
-                HStack(spacing: 16) {
-                    Text(ci.emoji).font(.system(size: 34))
-                        .frame(width: 64, height: 64)
-                        .background(ci.color.opacity(0.094))
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(category).font(.system(size: 28, weight: .black)).foregroundColor(AppColor.text)
-                        HStack(spacing: 4) {
-                            Text("\(totalItems) item\(totalItems == 1 ? "" : "s") ·")
-                                .font(.system(size: 13)).foregroundColor(AppColor.muted)
-                            Text(fmt(catTotal)).font(.system(size: 13, weight: .bold)).foregroundColor(ci.color)
+            Section(rows.isEmpty ? "" : loc("Expenses", "Расходы")) {
+                if rows.isEmpty {
+                    EmptyStateView(
+                        systemName: "tray",
+                        title: loc("Nothing here yet", "Пока пусто"),
+                        message: loc(
+                            "Receipts assigned to this category will appear here.",
+                            "Здесь появятся чеки, относящиеся к этой категории."
+                        )
+                    )
+                    .listRowBackground(Color.clear)
+                } else {
+                    ForEach(rows) { row in
+                        ExpenseRowView(
+                            expense: row.expense,
+                            categoryFilter: category,
+                            onPress: { expense in
+                                onExpensePress(expense, category)
+                            }
+                        )
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                onDeletePress(row.expense.id)
+                            } label: {
+                                Label(loc("Delete", "Удалить"), systemImage: "trash")
+                            }
+                            .tint(AppColor.danger)
                         }
                     }
                 }
-                .padding(.bottom, 20)
-
-                VStack(spacing: 10) {
-                    StatCardView(label: "Total", value: fmt(catTotal), color: ci.color)
-                    HStack(spacing: 10) {
-                        StatCardView(label: "Avg",
-                                     value: fmt(rows.isEmpty ? 0 : catTotal / Double(rows.count)),
-                                     color: AppColor.muted)
-                        StatCardView(label: "Count", value: "\(rows.count)", color: AppColor.success)
-                    }
-                }
-                .padding(.bottom, 20)
-
-                SectionLabel("\(rows.count) Expense\(rows.count == 1 ? "" : "s")")
-
-                LazyVStack(spacing: 8) {
-                    ForEach(rows) { row in
-                        CatExpenseRow(
-                            row: row, ci: ci, category: category,
-                            onPress: { onExpensePress(row.expense, category) },
-                            onDelete: { onDeletePress(row.expense.id) }
-                        )
-                    }
-                }
             }
-            .padding(16).padding(.bottom, 90)
         }
-        .background(Color.clear)
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppColor.bg)
+        .navigationTitle(localizedCategoryName(category))
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-private struct CatExpenseRow: View {
-    let row: CatDetailRow
-    let ci: CategoryInfo
+private struct CategorySummaryCard: View {
     let category: String
-    var onPress: () -> Void
-    var onDelete: () -> Void
-
-    private var title: String {
-        row.items.count == 1 ? row.items[0].name : row.expense.merchant
-    }
-    private var subtitle: String {
-        if row.items.count == 1 { return "\(row.expense.date) · \(row.expense.merchant)" }
-        let names = row.items.compactMap { $0.name.isEmpty ? nil : $0.name }.joined(separator: ", ")
-        return "\(row.expense.date) · \(names)"
-    }
+    let info: CategoryInfo
+    let total: Double
+    let itemCount: Int
+    let receiptCount: Int
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(ci.emoji).font(.system(size: 22))
-                .frame(width: 44, height: 44)
-                .background(ci.color.opacity(0.094))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 14) {
+                CategoryIconView(info: info, size: 58, cornerRadius: 20)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.system(size: 15, weight: .semibold)).foregroundColor(AppColor.text).lineLimit(1)
-                Text(subtitle).font(.system(size: 12)).foregroundColor(AppColor.muted).lineLimit(1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(localizedCategoryName(category))
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(AppColor.text)
+
+                    Text(localizedReceiptCountText(receiptCount))
+                        .font(.subheadline)
+                        .foregroundStyle(AppColor.muted)
+                }
+
+                Spacer()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(fmt(row.total)).font(.system(size: 16, weight: .bold)).foregroundColor(AppColor.text)
-                Text("\(row.items.count) item\(row.items.count == 1 ? "" : "s")")
-                    .font(.system(size: 11)).foregroundColor(AppColor.muted)
-            }
+            HStack(spacing: 12) {
+                SummaryChip(
+                    title: loc("Spent", "Потрачено"),
+                    value: fmt(total),
+                    systemName: "dollarsign.circle"
+                )
 
-            Button(action: onDelete) {
-                Text("🗑").font(.system(size: 16)).padding(8)
-                    .background(AppColor.dangerSoftFill)
-                    .overlay(RoundedRectangle(cornerRadius: Radii.sm).stroke(AppColor.dangerSoftBorder, lineWidth: 1))
-                    .clipShape(RoundedRectangle(cornerRadius: Radii.sm))
+                SummaryChip(
+                    title: loc("Items", "Позиции"),
+                    value: "\(itemCount)",
+                    systemName: "shippingbox"
+                )
             }
         }
-        .padding(14).cardStyle().onTapGesture { onPress() }
+        .padding(20)
+        .cardStyle(fill: AppColor.surface, stroke: AppColor.hairline)
     }
 }

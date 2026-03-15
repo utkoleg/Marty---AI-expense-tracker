@@ -11,35 +11,23 @@ struct Stats {
     var topCat: String? = nil
     var usedCats: [String] = []
     var thisMonth: String = currentMonthKey()
+    var displayCurrency: String = currentBaseCurrencyCode()
 }
 
 // MARK: - ExpenseStore
 
-/// Single source of truth for expenses. Persists to a JSON file in the app's
-/// Documents directory (compatible with the JS app's localStorage schema).
+/// Single source of truth for expenses backed by an injected repository.
 @MainActor
 final class ExpenseStore: ObservableObject {
 
     @Published private(set) var expenses: [Expense] = []
     @Published private(set) var stats: Stats = Stats()
-    private let persistEnabled: Bool
+    private let repository: any ExpenseRepository
 
-    private let fileURL: URL = {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return docs.appendingPathComponent("receiptly_v8.json")
-    }()
-
-    init() {
-        persistEnabled = true
-        expenses = load()
+    init(repository: any ExpenseRepository) {
+        self.repository = repository
+        expenses = repository.load()
         stats = computeStats(expenses)
-    }
-
-    /// In-memory seed for SwiftUI previews. Does not read/write disk.
-    init(previewExpenses: [Expense]) {
-        persistEnabled = false
-        expenses = previewExpenses
-        stats = computeStats(previewExpenses)
     }
 
     // MARK: - CRUD
@@ -66,59 +54,118 @@ final class ExpenseStore: ObservableObject {
     }
 
     func reload() {
-        guard persistEnabled else {
+        expenses = repository.load()
+        stats = computeStats(expenses)
+    }
+
+    func refreshStats() {
+        stats = computeStats(expenses)
+    }
+
+    func refreshCurrencySnapshots(
+        using exchangeRates: any ExchangeRateProviding,
+        baseCurrency: String = currentBaseCurrencyCode(),
+        expenseIDs: Set<String>? = nil
+    ) async {
+        guard !expenses.isEmpty else {
             stats = computeStats(expenses)
             return
         }
-        expenses = load()
-        stats = computeStats(expenses)
+
+        let normalizedBase = normalizedCurrencyCode(baseCurrency)
+        var nextExpenses = expenses
+        var quotesByPair: [String: ExchangeRateQuote] = [:]
+        var didChange = false
+
+        for index in nextExpenses.indices {
+            let expense = nextExpenses[index]
+            guard expenseIDs?.contains(expense.id) != false else { continue }
+
+            let normalizedOriginalCurrency = normalizedCurrencyCode(expense.currency)
+            var updatedExpense = expense
+            updatedExpense.currency = normalizedOriginalCurrency
+
+            if normalizedOriginalCurrency == normalizedBase {
+                didChange = didChange || applyConversionSnapshot(
+                    to: &updatedExpense,
+                    convertedTotal: updatedExpense.total,
+                    convertedCurrency: normalizedBase,
+                    exchangeRate: 1,
+                    effectiveAt: ISO8601DateFormatter().string(from: Date())
+                )
+                nextExpenses[index] = updatedExpense
+                continue
+            }
+
+            let pairKey = "\(normalizedOriginalCurrency)->\(normalizedBase)"
+
+            do {
+                let quote: ExchangeRateQuote
+                if let cached = quotesByPair[pairKey] {
+                    quote = cached
+                } else {
+                    let fetched = try await exchangeRates.latestRate(from: normalizedOriginalCurrency, to: normalizedBase)
+                    quotesByPair[pairKey] = fetched
+                    quote = fetched
+                }
+
+                let convertedTotal = sanitizePriceValue(updatedExpense.total * quote.rate)
+                didChange = didChange || applyConversionSnapshot(
+                    to: &updatedExpense,
+                    convertedTotal: convertedTotal,
+                    convertedCurrency: normalizedBase,
+                    exchangeRate: quote.rate,
+                    effectiveAt: quote.effectiveAt ?? quote.fetchedAt
+                )
+                nextExpenses[index] = updatedExpense
+            } catch {
+                AppLogger.currency.error(
+                    "Exchange rate refresh failed for \(normalizedOriginalCurrency, privacy: .public)->\(normalizedBase, privacy: .public): \(String(describing: error), privacy: .public)"
+                )
+                nextExpenses[index] = updatedExpense
+            }
+        }
+
+        expenses = nextExpenses
+        stats = computeStats(nextExpenses)
+
+        guard didChange else { return }
+
+        do {
+            try repository.save(nextExpenses)
+        } catch {
+            AppLogger.persistence.error("Expense persistence failed: \(String(describing: error), privacy: .public)")
+        }
     }
 
     // MARK: - Persistence
 
     private func persist() {
         stats = computeStats(expenses)
-        guard persistEnabled else { return }
         do {
-            let data = try JSONEncoder().encode(expenses)
-            try data.write(to: fileURL, options: .atomic)
+            try repository.save(expenses)
         } catch {
-            // Log; app still works in-memory
-            print("[ExpenseStore] persist failed:", error)
+            AppLogger.persistence.error("Expense persistence failed: \(String(describing: error), privacy: .public)")
         }
-    }
-
-    private func load() -> [Expense] {
-        // Try new file location first
-        if let data = try? Data(contentsOf: fileURL),
-           let decoded = try? JSONDecoder().decode([Expense].self, from: data) {
-            return decoded
-        }
-        // Fallback: try legacy UserDefaults key (in case the JS app's WebView
-        // stored data there before the native rewrite)
-        if let raw = UserDefaults.standard.string(forKey: "receiptly_v8"),
-           let data = raw.data(using: .utf8),
-           let decoded = try? JSONDecoder().decode([Expense].self, from: data) {
-            return decoded
-        }
-        return []
     }
 
     // MARK: - Stats computation  (mirrors useExpenses.js useMemo exactly)
 
     private func computeStats(_ expenses: [Expense]) -> Stats {
+        let baseCurrency = currentBaseCurrencyCode()
         var totalSpent: Double = 0
         var catTotals: [String: Double] = [:]
         var catCounts: [String: Int] = [:]
         var monthlyTotals: [String: Double] = [:]
 
         for e in expenses {
-            totalSpent += e.total
+            let expenseTotal = e.displayTotal(for: baseCurrency)
+            totalSpent += expenseTotal
 
             if let groups = e.groups, !groups.isEmpty {
                 // Multi-category: attribute totals per group category
                 for g in groups {
-                    catTotals[g.category, default: 0] += g.total
+                    catTotals[g.category, default: 0] += e.convertedAmount(for: g.total, baseCurrency: baseCurrency) ?? g.total
                 }
                 // Count expense once per category it appears in
                 let seen = Set(groups.map(\.category))
@@ -126,13 +173,13 @@ final class ExpenseStore: ObservableObject {
                     catCounts[cat, default: 0] += 1
                 }
             } else {
-                catTotals[e.category, default: 0] += e.total
+                catTotals[e.category, default: 0] += expenseTotal
                 catCounts[e.category, default: 0] += 1
             }
 
             let month = String(e.date.prefix(7))
             if !month.isEmpty {
-                monthlyTotals[month, default: 0] += e.total
+                monthlyTotals[month, default: 0] += expenseTotal
             }
         }
 
@@ -146,8 +193,33 @@ final class ExpenseStore: ObservableObject {
             monthlyTotals: monthlyTotals,
             topCat: topCat,
             usedCats: usedCats,
-            thisMonth: currentMonthKey()
+            thisMonth: currentMonthKey(),
+            displayCurrency: baseCurrency
         )
+    }
+
+    private func applyConversionSnapshot(
+        to expense: inout Expense,
+        convertedTotal: Double,
+        convertedCurrency: String,
+        exchangeRate: Double,
+        effectiveAt: String
+    ) -> Bool {
+        let normalizedConvertedCurrency = normalizedCurrencyCode(convertedCurrency)
+        let normalizedOriginalCurrency = normalizedCurrencyCode(expense.currency)
+
+        let hasChanged = expense.currency != normalizedOriginalCurrency
+            || expense.convertedTotal != convertedTotal
+            || expense.convertedCurrency != normalizedConvertedCurrency
+            || expense.exchangeRate != exchangeRate
+            || expense.exchangeRateUpdatedAt != effectiveAt
+
+        expense.currency = normalizedOriginalCurrency
+        expense.convertedTotal = convertedTotal
+        expense.convertedCurrency = normalizedConvertedCurrency
+        expense.exchangeRate = exchangeRate
+        expense.exchangeRateUpdatedAt = effectiveAt
+        return hasChanged
     }
 }
 
@@ -155,13 +227,6 @@ final class ExpenseStore: ObservableObject {
 
 extension ExpenseStore {
     func csvString() -> String {
-        var rows: [[String]] = [["Date", "Merchant", "Category", "Total", "Items"]]
-        for e in expenses {
-            let itemNames = e.items.map(\.name).joined(separator: "; ")
-            rows.append([e.date, e.merchant, e.category, String(format: "%.2f", e.total), itemNames])
-        }
-        return rows
-            .map { $0.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: ",") }
-            .joined(separator: "\n")
+        ExpenseCSVExporter.csvString(from: expenses)
     }
 }

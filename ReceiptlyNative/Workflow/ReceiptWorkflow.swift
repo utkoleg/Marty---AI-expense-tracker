@@ -31,15 +31,20 @@ final class ReceiptWorkflow: ObservableObject {
     @Published var step: WorkflowStep = .idle
     @Published var isLoading = false
     @Published var flash: Expense? = nil
+    @Published var isFlashVisible = false
 
     private var analyzeTask: Task<Void, Never>?
     private var flashTask: Task<Void, Never>?
 
     // Dependencies
     private let store: ExpenseStore
+    private let analyzer: any ReceiptAnalyzing
+    private let exchangeRates: any ExchangeRateProviding
 
-    init(store: ExpenseStore) {
+    init(store: ExpenseStore, analyzer: any ReceiptAnalyzing, exchangeRates: any ExchangeRateProviding) {
         self.store = store
+        self.analyzer = analyzer
+        self.exchangeRates = exchangeRates
     }
 
     // MARK: - Stage
@@ -74,7 +79,7 @@ final class ReceiptWorkflow: ObservableObject {
         analyzeTask = Task {
             defer { isLoading = false }
             do {
-                let groups = try await ReceiptAnalyzer.shared.analyze(images: images)
+                let groups = try await analyzer.analyze(images: images, timeoutSeconds: 60)
                 guard !Task.isCancelled else { return }
                 step = .confirming(groups)
             } catch AnalyzerError.notAReceipt {
@@ -86,7 +91,10 @@ final class ReceiptWorkflow: ObservableObject {
                 if case .analyzing = step { step = .idle }
             } catch AnalyzerError.timeout {
                 if case .analyzing(let imgs) = step { step = .staging(imgs) }
-                errorMessage = "Request timed out. Check your connection and try again."
+                errorMessage = loc(
+                    "Request timed out. Check your connection and try again.",
+                    "Время запроса истекло. Проверь соединение и попробуй снова."
+                )
             } catch {
                 if case .analyzing(let imgs) = step { step = .staging(imgs) }
                 errorMessage = error.localizedDescription
@@ -103,11 +111,20 @@ final class ReceiptWorkflow: ObservableObject {
 
     // MARK: - Confirm new receipt
 
+    func startManualEntry() {
+        analyzeTask?.cancel()
+        isLoading = false
+        step = .confirming([])
+    }
+
     func confirmReceipt(editedGroups: [ReceiptGroup]) {
         let expense = buildExpense(from: editedGroups)
         store.add(expense)
         step = .idle
         showFlash(expense)
+        Task {
+            await syncCurrencySnapshot(forExpenseID: expense.id)
+        }
     }
 
     func discardPending() {
@@ -136,6 +153,9 @@ final class ReceiptWorkflow: ObservableObject {
         )
         store.update(updated)
         step = .idle
+        Task {
+            await syncCurrencySnapshot(forExpenseID: updated.id)
+        }
     }
 
     func discardEdit() {
@@ -147,8 +167,20 @@ final class ReceiptWorkflow: ObservableObject {
     private func showFlash(_ expense: Expense) {
         flashTask?.cancel()
         flash = expense
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+            isFlashVisible = true
+        }
+
         flashTask = Task {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+
+            withAnimation(.easeInOut(duration: 0.24)) {
+                isFlashVisible = false
+            }
+
+            try? await Task.sleep(nanoseconds: 240_000_000)
+
             if !Task.isCancelled { flash = nil }
         }
     }
@@ -158,4 +190,16 @@ final class ReceiptWorkflow: ObservableObject {
 
     @Published var errorMessage: String? = nil
     @Published var notReceiptDetected: Bool = false
+
+    private func syncCurrencySnapshot(forExpenseID expenseID: String) async {
+        await store.refreshCurrencySnapshots(
+            using: exchangeRates,
+            baseCurrency: currentBaseCurrencyCode(),
+            expenseIDs: [expenseID]
+        )
+
+        if flash?.id == expenseID {
+            flash = store.expenses.first(where: { $0.id == expenseID })
+        }
+    }
 }

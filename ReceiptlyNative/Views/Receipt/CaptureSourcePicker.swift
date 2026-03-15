@@ -1,7 +1,5 @@
-import SwiftUI
 import PhotosUI
-
-// MARK: - Upload source action sheet
+import SwiftUI
 
 struct UploadSheetView: View {
     var onCamera: () -> Void
@@ -9,62 +7,73 @@ struct UploadSheetView: View {
     var onClose: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Handle
-            Capsule().fill(AppColor.border).frame(width: 36, height: 4)
-                .padding(.top, 14).padding(.bottom, 16)
+        NavigationStack {
+            List {
+                Section {
+                    UploadOption(
+                        systemName: "camera.fill",
+                        title: loc("Take Photo", "Сделать фото"),
+                        subtitle: loc("Capture a new receipt with the camera", "Сделай новое фото чека камерой"),
+                        action: onCamera
+                    )
 
-            Text("Add Receipt")
-                .font(.system(size: 17, weight: .bold))
-                .foregroundColor(AppColor.text)
-                .padding(.bottom, 20)
-
-            UploadOption(emoji: "📷", title: "Take Photo", subtitle: "Use camera", action: onCamera)
-            Divider().background(AppColor.border)
-            UploadOption(emoji: "🖼️", title: "Photo Library", subtitle: "Choose existing photo", action: onLibrary)
-
-            Button(action: { Haptics.light(); onClose() }) { Text("Cancel") }
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(AppColor.muted)
-                .frame(maxWidth: .infinity)
-                .padding(16)
-                .padding(.bottom, 8)
+                    UploadOption(
+                        systemName: "photo.on.rectangle.angled",
+                        title: loc("Photo Library", "Галерея"),
+                        subtitle: loc("Import one or more receipt photos", "Импортируй одно или несколько фото чеков"),
+                        action: onLibrary
+                    )
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(AppColor.bg)
+            .navigationTitle(loc("Add Receipt", "Добавить чек"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(loc("Cancel", "Отмена"), action: onClose)
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(AppColor.surface)
     }
 }
 
 private struct UploadOption: View {
-    let emoji: String
+    let systemName: String
     let title: String
     let subtitle: String
     let action: () -> Void
 
     var body: some View {
-        Button(action: { Haptics.light(); action() }) {
-            HStack(spacing: 16) {
-                Text(emoji).font(.system(size: 26))
-                    .frame(width: 48, height: 48)
-                    .background(AppColor.accent.opacity(0.094))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+        Button(action: {
+            Haptics.light()
+            action()
+        }) {
+            HStack(spacing: 14) {
+                SymbolBadge(systemName: systemName, color: AppColor.accent, size: 44, cornerRadius: 14)
+
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 16, weight: .semibold)).foregroundColor(AppColor.text)
-                    Text(subtitle).font(.system(size: 12)).foregroundColor(AppColor.muted)
+                    Text(title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AppColor.text)
+
+                    Text(subtitle)
+                        .font(.footnote)
+                        .foregroundStyle(AppColor.muted)
                 }
+
                 Spacer()
+
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(AppColor.muted)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AppColor.muted)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 }
-
-// MARK: - PHPickerViewController wrapper
 
 struct PhotoLibraryPicker: UIViewControllerRepresentable {
     var onPick: (UIImage) -> Void
@@ -84,15 +93,20 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, PHPickerViewControllerDelegate {
         let onPick: (UIImage) -> Void
-        init(onPick: @escaping (UIImage) -> Void) { self.onPick = onPick }
+
+        init(onPick: @escaping (UIImage) -> Void) {
+            self.onPick = onPick
+        }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             picker.dismiss(animated: true)
             for result in results {
                 if result.itemProvider.canLoadObject(ofClass: UIImage.self) {
-                    result.itemProvider.loadObject(ofClass: UIImage.self) { obj, _ in
-                        if let img = obj as? UIImage {
-                            DispatchQueue.main.async { self.onPick(img) }
+                    result.itemProvider.loadObject(ofClass: UIImage.self) { object, _ in
+                        if let image = object as? UIImage {
+                            DispatchQueue.main.async {
+                                self.onPick(image)
+                            }
                         }
                     }
                 }
@@ -100,8 +114,6 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
         }
     }
 }
-
-// MARK: - UIImagePickerController wrapper (Camera)
 
 struct CameraPicker: UIViewControllerRepresentable {
     var onCapture: (UIImage) -> Void
@@ -121,16 +133,19 @@ struct CameraPicker: UIViewControllerRepresentable {
     final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
         let onCapture: (UIImage) -> Void
         let onCancel: () -> Void
+
         init(onCapture: @escaping (UIImage) -> Void, onCancel: @escaping () -> Void) {
             self.onCapture = onCapture
             self.onCancel = onCancel
         }
 
-        func imagePickerController(_ picker: UIImagePickerController,
-                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
             picker.dismiss(animated: true)
-            if let img = info[.originalImage] as? UIImage {
-                onCapture(img)
+            if let image = info[.originalImage] as? UIImage {
+                onCapture(image)
             }
         }
 

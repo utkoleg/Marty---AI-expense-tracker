@@ -75,6 +75,10 @@ struct Expense: Codable, Identifiable, Equatable {
     var date: String        // YYYY-MM-DD
     var total: Double
     var currency: String
+    var convertedTotal: Double?
+    var convertedCurrency: String?
+    var exchangeRate: Double?
+    var exchangeRateUpdatedAt: String?
     var category: String
     var items: [ExpenseItem]
     var notes: String
@@ -86,7 +90,11 @@ struct Expense: Codable, Identifiable, Equatable {
         merchant: String,
         date: String,
         total: Double,
-        currency: String = "USD",
+        currency: String = currentBaseCurrencyCode(),
+        convertedTotal: Double? = nil,
+        convertedCurrency: String? = nil,
+        exchangeRate: Double? = nil,
+        exchangeRateUpdatedAt: String? = nil,
         category: String,
         items: [ExpenseItem],
         notes: String = "",
@@ -98,6 +106,10 @@ struct Expense: Codable, Identifiable, Equatable {
         self.date = date
         self.total = total
         self.currency = currency
+        self.convertedTotal = convertedTotal
+        self.convertedCurrency = convertedCurrency
+        self.exchangeRate = exchangeRate
+        self.exchangeRateUpdatedAt = exchangeRateUpdatedAt
         self.category = category
         self.items = items
         self.notes = notes

@@ -3,303 +3,313 @@ import SwiftUI
 struct ExpenseDetailView: View {
     let expense: Expense
     var categoryFilter: String? = nil
-    var onClose: () -> Void
     var onDelete: (String) -> Void
     var onEdit: (Expense) -> Void
     var onCategoryPress: ((String) -> Void)? = nil
 
-    @State private var dragOffset: CGFloat = 0
-    @State private var isDragging = false
+    @Environment(\.dismiss) private var dismiss
     @State private var showFull = false
+    @State private var showDeleteConfirm = false
 
-    private var cat: CategoryInfo { categoryInfo(for: expense.category) }
-    private var isMulti: Bool { (expense.groups?.count ?? 0) > 1 }
+    private var categoryInfoValue: CategoryInfo { categoryInfo(for: expense.category) }
+    private var isMultiCategory: Bool { (expense.groups?.count ?? 0) > 1 }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Backdrop
-            AppColor.scrimLight
-                .ignoresSafeArea()
-                .onTapGesture { onClose() }
-
-            // Sheet
-            VStack(spacing: 0) {
-                // Drag handle
-                Capsule()
-                    .fill(AppColor.border)
-                    .frame(width: 36, height: 4)
-                    .padding(.top, 14)
-                    .padding(.bottom, 8)
-
-                // Header
-                sheetHeader
-                    .padding(20)
-                    .overlay(Divider().background(AppColor.border), alignment: .bottom)
-
-                // Body
-                ScrollView {
-                    sheetBody.padding(20)
+        NavigationStack {
+            List {
+                Section {
+                    ExpenseHeroCard(expense: expense)
+                        .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 8, trailing: 20))
+                        .listRowBackground(Color.clear)
                 }
-            }
-            .background(AppColor.surface)
-            .overlay(
-                RoundedCornerShape(radius: Radii.xxl, corners: [.topLeft, .topRight])
-                    .stroke(AppColor.border, lineWidth: 1)
-            )
-            .clipShape(RoundedCornerShape(radius: Radii.xxl, corners: [.topLeft, .topRight]))
-            .shadow(color: AppColor.shadowMedium, radius: 24, x: 0, y: -2)
-            .frame(maxHeight: UIScreen.main.bounds.height * 0.88)
-            .offset(y: dragOffset)
-            .gesture(
-                DragGesture()
-                    .onChanged { v in
-                        let dy = v.translation.height
-                        if dy > 0 { dragOffset = dy - 8 }
-                    }
-                    .onEnded { v in
-                        if dragOffset > 90 { onClose() }
-                        else { withAnimation(.spring(response: 0.4)) { dragOffset = 0 } }
-                    }
-            )
-            .transition(.move(edge: .bottom))
-        }
-        .ignoresSafeArea()
-    }
-
-    @ViewBuilder
-    private var sheetHeader: some View {
-        HStack(spacing: 12) {
-            // Category icon(s)
-            if isMulti, let groups = expense.groups {
-                HStack(spacing: 4) {
-                    ForEach(groups, id: \.category) { g in
-                        let ci = categoryInfo(for: g.category)
-                        Text(ci.emoji)
-                            .font(.system(size: 18))
-                            .frame(width: 34, height: 34)
-                            .background(ci.color.opacity(0.125))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                }
-            } else {
-                Text(cat.emoji).font(.system(size: 30))
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(expense.merchant.isEmpty ? "(no merchant)" : expense.merchant)
-                    .font(.system(size: 18, weight: .black))
-                    .foregroundColor(AppColor.text)
-                Text("\(expense.date) · \(isMulti ? "\(expense.groups?.count ?? 0) categories" : expense.category)")
-                    .font(.system(size: 12))
-                    .foregroundColor(AppColor.muted)
-            }
-            Spacer()
-            HStack(spacing: 8) {
-                actionButton(icon: "✏️", color: AppColor.accent, background: AppColor.accent.opacity(0.1)) {
-                    onEdit(expense)
-                }
-                actionButton(icon: "🗑", color: AppColor.danger, background: AppColor.danger.opacity(0.1)) {
-                    onDelete(expense.id)
-                }
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(AppColor.text)
-                        .frame(width: 34, height: 34)
-                        .background(AppColor.surface)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(AppColor.border, lineWidth: 1))
-                }
-            }
-        }
-    }
-
-    private func actionButton(icon: String, color: Color, background: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(icon)
-                .font(.system(size: 14))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(background)
-                .overlay(RoundedRectangle(cornerRadius: Radii.sm).stroke(color.opacity(0.25), lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: Radii.sm))
-        }
-    }
-
-    @ViewBuilder
-    private var sheetBody: some View {
-        // Filtered category view
-        if let filter = categoryFilter, !showFull {
-            let group = expense.groups?.first { $0.category == filter }
-                ?? ExpenseGroup(category: expense.category, items: expense.items, total: expense.total)
-            let ci = categoryInfo(for: group.category)
-
-            VStack(alignment: .leading, spacing: 0) {
-                // Category total banner
-                HStack {
-                    Text("\(filter) total").font(.system(size: 13)).foregroundColor(AppColor.muted)
-                    Spacer()
-                    Text(fmt(group.total)).font(.system(size: 28, weight: .black)).foregroundColor(ci.color)
-                }
-                .padding(14)
-                .background(AppColor.card)
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColor.border, lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .padding(.bottom, 16)
-
-                // Category pill
-                categoryPill(name: filter, ci: ci, total: nil)
-                    .padding(.bottom, 6)
-
-                // Items
-                itemList(group.items)
-
-                // "Show whole receipt" button
-                Button { withAnimation { showFull = true } } label: {
-                    Text("Show whole receipt ›")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(AppColor.muted)
-                        .frame(maxWidth: .infinity)
-                        .padding(12)
-                        .overlay(RoundedRectangle(cornerRadius: Radii.md).stroke(AppColor.border, lineWidth: 1))
-                }
-                .padding(.top, 20)
-            }
-        } else {
-            // Full receipt view
-            VStack(alignment: .leading, spacing: 0) {
-                // Total paid banner
-                HStack {
-                    Text("Total Paid").font(.system(size: 13)).foregroundColor(AppColor.muted)
-                    Spacer()
-                    Text(fmt(expense.total)).font(.system(size: 28, weight: .black)).foregroundColor(AppColor.accent)
-                }
-                .padding(14)
-                .background(AppColor.card)
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColor.border, lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .padding(.bottom, 16)
 
                 if !expense.notes.isEmpty {
-                    Text(expense.notes)
-                        .font(.system(size: 13))
-                        .foregroundColor(AppColor.muted)
-                        .padding(14)
-                        .background(AppColor.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: Radii.md))
-                        .padding(.bottom, 16)
+                    Section(loc("Notes", "Заметки")) {
+                        Text(expense.notes)
+                            .font(.body)
+                            .foregroundStyle(AppColor.text)
+                    }
                 }
 
-                if expense.items.isEmpty {
-                    Text("No line items extracted. Try a clearer image.")
-                        .font(.system(size: 13))
-                        .foregroundColor(AppColor.muted)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 24)
-                } else if isMulti, let groups = expense.groups {
-                    ForEach(groups, id: \.category) { g in
-                        let ci = categoryInfo(for: g.category)
-                        VStack(alignment: .leading, spacing: 6) {
-                            categoryPill(name: g.category, ci: ci, total: g.total)
-                            itemList(g.items)
+                if let categoryFilter, !showFull {
+                    filteredContent(for: categoryFilter)
+                } else {
+                    fullContent
+                }
+
+                Section {
+                    Button {
+                        showDeleteConfirm = true
+                    } label: {
+                        Label {
+                            Text(loc("Delete Expense", "Удалить расход"))
+                                .foregroundStyle(AppColor.danger)
+                        } icon: {
+                            Image(systemName: "trash")
+                                .foregroundStyle(AppColor.danger)
                         }
-                        .padding(.bottom, 20)
                     }
-                    // Grand total line
-                    HStack {
-                        Text("Total").font(.system(size: 17, weight: .black)).foregroundColor(AppColor.muted)
-                        Spacer()
-                        Text(fmt(expense.total)).font(.system(size: 17, weight: .black)).foregroundColor(AppColor.accent)
+                    .confirmationDialog(loc("Delete expense?", "Удалить расход?"), isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                        Button(loc("Delete", "Удалить"), role: .destructive) {
+                            closeThen { onDelete(expense.id) }
+                        }
+                        Button(loc("Cancel", "Отмена"), role: .cancel) {}
+                    } message: {
+                        Text(loc("This cannot be undone.", "Это действие нельзя отменить."))
                     }
-                    .padding(.top, 8)
-                    .overlay(Divider().background(AppColor.accent), alignment: .top)
-                } else {
-                    categoryPill(name: expense.category, ci: cat, total: expense.total)
-                        .padding(.bottom, 6)
-                    itemList(expense.items)
-                    HStack {
-                        Text("Total").font(.system(size: 17, weight: .black)).foregroundColor(AppColor.muted)
-                        Spacer()
-                        Text(fmt(expense.total)).font(.system(size: 17, weight: .black)).foregroundColor(AppColor.accent)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(AppColor.bg)
+            .navigationTitle(expense.merchant.isEmpty ? loc("Expense", "Расход") : expense.merchant)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(loc("Done", "Готово")) { dismiss() }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(loc("Edit", "Изменить")) {
+                        closeThen { onEdit(expense) }
                     }
-                    .padding(.top, 16)
-                    .overlay(Divider().background(AppColor.accent), alignment: .top)
                 }
             }
         }
     }
 
-    private func categoryPill(name: String, ci: CategoryInfo, total: Double?) -> some View {
-        Button {
-            onCategoryPress?(name)
-        } label: {
-            HStack(spacing: 8) {
-                Text(ci.emoji).font(.system(size: 16))
-                Text(name).font(.system(size: 13, weight: .bold)).foregroundColor(ci.color)
-                if let t = total {
-                    Spacer()
-                    Text(fmt(t)).font(.system(size: 13, weight: .bold)).foregroundColor(ci.color)
-                } else {
-                    Spacer()
-                }
-                if onCategoryPress != nil {
-                    Text("›").font(.system(size: 11)).foregroundColor(ci.color.opacity(0.7))
+    @ViewBuilder
+    private func filteredContent(for category: String) -> some View {
+        let group = expense.groups?.first { $0.category == category }
+            ?? ExpenseGroup(category: expense.category, items: expense.items, total: expense.total)
+
+        Section(localizedCategoryName(category)) {
+            CategorySummaryButton(
+                category: category,
+                info: categoryInfo(for: category),
+                totalText: expense.displayAmountText(for: group.total),
+                onPress: onCategoryPress
+            )
+
+            if group.items.isEmpty {
+                Text(loc("No line items extracted for this category.", "Для этой категории позиции не были извлечены."))
+                    .font(.subheadline)
+                    .foregroundStyle(AppColor.muted)
+            } else {
+                ForEach(group.items) { item in
+                    ExpenseLineItemRow(item: item, currencyCode: expense.currency)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(ci.color.opacity(0.078))
-            .overlay(RoundedRectangle(cornerRadius: Radii.md).stroke(ci.color.opacity(0.16), lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: Radii.md))
         }
-        .disabled(onCategoryPress == nil)
-        .buttonStyle(.plain)
+
+        Section {
+            Button(loc("Show Entire Receipt", "Показать весь чек")) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showFull = true
+                }
+            }
+        }
     }
 
-    private func itemList(_ items: [ExpenseItem]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.offset) { i, item in
-                HStack {
-                    Text(item.name.isEmpty ? "(unnamed)" : item.name)
-                        .font(.system(size: 15))
-                        .foregroundColor(AppColor.text)
-                    Spacer()
-                    if item.quantity > 1 {
-                        Text("×\(item.quantity)")
-                            .font(.system(size: 12))
-                            .foregroundColor(AppColor.muted)
-                            .padding(.trailing, 10)
+    @ViewBuilder
+    private var fullContent: some View {
+        if expense.items.isEmpty && (expense.groups?.isEmpty != false) {
+            Section {
+                EmptyStateView(
+                    systemName: "tray",
+                    title: loc("No line items extracted", "Позиции не извлечены"),
+                    message: loc("Try scanning a clearer image if you want line-by-line details.", "Попробуй более четкое фото, если нужны детальные позиции.")
+                )
+                .listRowBackground(Color.clear)
+            }
+        } else if isMultiCategory, let groups = expense.groups {
+            ForEach(groups, id: \.category) { group in
+                Section(localizedCategoryName(group.category)) {
+                    CategorySummaryButton(
+                        category: group.category,
+                        info: categoryInfo(for: group.category),
+                        totalText: expense.displayAmountText(for: group.total),
+                        onPress: onCategoryPress
+                    )
+
+                    ForEach(group.items) { item in
+                        ExpenseLineItemRow(item: item, currencyCode: expense.currency)
                     }
-                    Text(fmt(item.price))
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(AppColor.text)
-                }
-                .padding(.vertical, 12)
-                .padding(.horizontal, 4)
-                if i < items.count - 1 {
-                    Divider().background(AppColor.border)
+
+                    LabeledContent(loc("Subtotal", "Подытог"), value: expense.displayAmountText(for: group.total))
+                        .font(.subheadline.weight(.semibold))
                 }
             }
+
+            Section {
+                LabeledContent(loc("Total", "Итого"), value: expense.displayAmountText(for: expense.total))
+                    .font(.headline.weight(.semibold))
+            }
+        } else {
+            Section(localizedCategoryName(expense.category)) {
+                CategorySummaryButton(
+                    category: expense.category,
+                    info: categoryInfoValue,
+                    totalText: expense.displayAmountText(for: expense.total),
+                    onPress: onCategoryPress
+                )
+
+                ForEach(expense.items) { item in
+                    ExpenseLineItemRow(item: item, currencyCode: expense.currency)
+                }
+
+                LabeledContent(loc("Total", "Итого"), value: expense.displayAmountText(for: expense.total))
+                    .font(.headline.weight(.semibold))
+            }
         }
-        .padding(.horizontal, 12)
-        .background(AppColor.card)
-        .overlay(RoundedRectangle(cornerRadius: Radii.md).stroke(AppColor.border, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: Radii.md))
+    }
+
+    private func closeThen(_ action: @escaping () -> Void) {
+        dismiss()
+        UIActionScheduler.perform(after: UIActionDelay.followUpActionSeconds) {
+            action()
+        }
     }
 }
 
-// MARK: - Rounded corner helper
+private struct ExpenseHeroCard: View {
+    let expense: Expense
 
-struct RoundedCornerShape: Shape {
-    var radius: CGFloat
-    var corners: UIRectCorner
-    func path(in rect: CGRect) -> Path {
-        let path = UIBezierPath(
-            roundedRect: rect,
-            byRoundingCorners: corners,
-            cornerRadii: CGSize(width: radius, height: radius)
+    private var isMultiCategory: Bool { (expense.groups?.count ?? 0) > 1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 14) {
+                if isMultiCategory, let groups = expense.groups {
+                    HStack(spacing: 6) {
+                        ForEach(groups.prefix(3), id: \.category) { group in
+                            CategoryIconView(info: categoryInfo(for: group.category), size: 42, cornerRadius: 14)
+                        }
+                    }
+                } else {
+                    CategoryIconView(info: categoryInfo(for: expense.category), size: 52, cornerRadius: 18)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(expense.merchant.isEmpty ? localizedNoMerchantText() : expense.merchant)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(AppColor.text)
+
+                    Text(displayReceiptDate(expense.date))
+                        .font(.subheadline)
+                        .foregroundStyle(AppColor.muted)
+                }
+
+                Spacer()
+            }
+
+            HStack(spacing: 12) {
+                ExpenseTotalChip(expense: expense)
+
+                SummaryChip(
+                    title: loc("Items", "Позиции"),
+                    value: "\(expense.items.count)",
+                    systemName: "shippingbox"
+                )
+            }
+        }
+        .padding(20)
+        .cardStyle(fill: AppColor.elevated, stroke: AppColor.hairline)
+    }
+}
+
+private struct ExpenseTotalChip: View {
+    let expense: Expense
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: "dollarsign.circle")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .frame(width: 14, alignment: .leading)
+
+                Text(loc("Total", "Итого"))
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(AppColor.muted)
+
+            Text(expense.displayAmountText(for: expense.total))
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(AppColor.text)
+                .lineLimit(2)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(AppColor.tertiarySurface, in: RoundedRectangle(cornerRadius: Radii.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Radii.md, style: .continuous)
+                .stroke(AppColor.border, lineWidth: 1)
         )
-        return Path(path.cgPath)
+    }
+}
+
+private struct CategorySummaryButton: View {
+    let category: String
+    let info: CategoryInfo
+    let totalText: String
+    var onPress: ((String) -> Void)? = nil
+
+    var body: some View {
+        Button {
+            onPress?(category)
+        } label: {
+            HStack(spacing: 12) {
+                CategoryIconView(info: info, size: 40, cornerRadius: 13)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(localizedCategoryName(category))
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AppColor.text)
+
+                    Text(totalText)
+                        .font(.footnote)
+                        .foregroundStyle(info.color)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+
+                if onPress != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AppColor.muted)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(onPress == nil)
+    }
+}
+
+private struct ExpenseLineItemRow: View {
+    let item: ExpenseItem
+    let currencyCode: String
+
+    var body: some View {
+        LabeledContent {
+            Text(fmt(item.price, currencyCode: currencyCode))
+                .font(.body.weight(.semibold))
+                .foregroundStyle(AppColor.text)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.name.isEmpty ? localizedUnnamedItemText() : item.name)
+                    .font(.body)
+                    .foregroundStyle(AppColor.text)
+
+                if item.quantity > 1 {
+                    Text(localizedQuantityText(item.quantity))
+                        .font(.caption)
+                        .foregroundStyle(AppColor.muted)
+                }
+            }
+        }
     }
 }

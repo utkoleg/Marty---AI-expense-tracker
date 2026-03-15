@@ -1,89 +1,91 @@
 import SwiftUI
 
-// MARK: - Tab definition
-
 enum Tab: String, CaseIterable {
-    case categories = "categories"
-    case home       = "home"
-    case settings   = "settings"
+    case home
+    case categories
+    case settings
 
     var icon: String {
         switch self {
-        case .categories: return "chart.pie"
-        case .home:       return "house"
-        case .settings:   return "gearshape"
-        }
-    }
-
-    var activeIcon: String {
-        switch self {
-        case .categories: return "chart.pie.fill"
-        case .home:       return "house.fill"
-        case .settings:   return "gearshape.fill"
+        case .home: return "house"
+        case .categories: return "square.grid.2x2"
+        case .settings: return "gearshape"
         }
     }
 
     var label: String {
         switch self {
-        case .categories: return "Categories"
-        case .home:       return "Home"
-        case .settings:   return "Settings"
+        case .home: return loc("Home", "Главная")
+        case .categories: return loc("Categories", "Категории")
+        case .settings: return loc("Settings", "Настройки")
         }
     }
 }
 
-// MARK: - ContentView
+private struct ExpenseSelection: Identifiable, Equatable {
+    let expense: Expense
+    let categoryFilter: String?
+
+    var id: String {
+        "\(expense.id)|\(categoryFilter ?? "")"
+    }
+}
+
+private struct PendingDeletion {
+    let expense: Expense
+}
 
 @MainActor
 struct ContentView: View {
-
+    @AppStorage(AppPreferences.baseCurrencyKey) private var baseCurrencyRawValue = BaseCurrencyOption.usd.rawValue
     @StateObject private var store: ExpenseStore
     @StateObject private var workflow: ReceiptWorkflow
+    private let exchangeRates: any ExchangeRateProviding
 
-    init(initialTab: Tab = .home) {
-        let defaultStore = ExpenseStore()
-        _store = StateObject(wrappedValue: defaultStore)
-        _workflow = StateObject(wrappedValue: ReceiptWorkflow(store: defaultStore))
-        _tab = State(initialValue: initialTab)
-    }
-
-    init(store: ExpenseStore, initialTab: Tab = .home) {
-        _store = StateObject(wrappedValue: store)
-        _workflow = StateObject(wrappedValue: ReceiptWorkflow(store: store))
-        _tab = State(initialValue: initialTab)
-    }
-
-    // Navigation
     @State private var tab: Tab = .home
-    @State private var activeCat: String? = nil
-    @State private var showingDetail = false      // category detail
-
-    // Overlays
+    @State private var categoryPath: [String] = []
     @State private var showUploadSheet = false
-    @State private var showCamera      = false
-    @State private var showLibrary     = false
-    @State private var detailExpense: Expense?    = nil
-    @State private var detailCatFilter: String?   = nil
-    @State private var deleteTarget: String?      = nil
-    @State private var showNotReceipt  = false
-    @State private var errorMsg: String?          = nil
-
-    // Navbar visibility — driven by explicit @State, not computed, for reliable SwiftUI updates
-    @State private var navHidden = false
-
-    // Staging "Add More" sheet (separate from the main upload sheet)
+    @State private var showCamera = false
+    @State private var showLibrary = false
+    @State private var detailSelection: ExpenseSelection? = nil
+    @State private var pendingDeletion: PendingDeletion? = nil
+    @State private var isUndoBannerVisible = false
+    @State private var deleteUndoTask: Task<Void, Never>? = nil
+    @State private var showNotReceipt = false
+    @State private var errorMsg: String? = nil
     @State private var stagingAddMore = false
 
-    // Pager drag state
-    @State private var pageDragOffset: CGFloat = 0
-    @State private var isPageDragging = false
+    init(dependencies: AppDependencies = .live(), initialTab: Tab = .home) {
+        let store = ExpenseStore(repository: dependencies.repository)
+        self.init(
+            store: store,
+            analyzer: dependencies.analyzer,
+            exchangeRates: dependencies.exchangeRates,
+            initialTab: initialTab
+        )
+    }
 
-    // MARK: - Sheet bindings
+    init(
+        store: ExpenseStore,
+        analyzer: any ReceiptAnalyzing,
+        exchangeRates: any ExchangeRateProviding,
+        initialTab: Tab = .home
+    ) {
+        _store = StateObject(wrappedValue: store)
+        _workflow = StateObject(wrappedValue: ReceiptWorkflow(store: store, analyzer: analyzer, exchangeRates: exchangeRates))
+        self.exchangeRates = exchangeRates
+        _tab = State(initialValue: initialTab)
+    }
 
     private var stagingBinding: Binding<Bool> {
         Binding(
-            get: { if case .staging = workflow.step { return true } else { return false } },
-            set: { _ in }   // dismissed only via Cancel button
+            get: {
+                if case .staging = workflow.step {
+                    return true
+                }
+                return false
+            },
+            set: { _ in }
         )
     }
 
@@ -91,545 +93,361 @@ struct ContentView: View {
         Binding(
             get: {
                 if case .confirming = workflow.step { return true }
-                if case .editing    = workflow.step { return true }
+                if case .editing = workflow.step { return true }
                 return false
             },
-            set: { _ in }   // dismissed only via Discard button
+            set: { _ in }
+        )
+    }
+
+    private var stagingSheetHeight: CGFloat {
+        max(470, min(UIScreen.main.bounds.height * 0.60, 520))
+    }
+
+    private var uploadSheetHeight: CGFloat {
+        max(300, min(UIScreen.main.bounds.height * 0.36, 320))
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding(
+            get: { errorMsg != nil },
+            set: { isPresented in
+                if !isPresented {
+                    errorMsg = nil
+                }
+            }
         )
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            AppColor.bg.ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                navBar
-                    .background(AppColor.bg)
-                    .opacity(navHidden ? 0 : 1)
-                    .allowsHitTesting(!navHidden)
-                    .animation(.easeInOut(duration: 0.15), value: navHidden)
-
-                pageContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        rootContent
+            .tint(AppColor.accent)
+            .sheet(isPresented: $showUploadSheet) {
+                uploadSheet(onClose: { showUploadSheet = false })
+                    .presentationDetents([.height(uploadSheetHeight)])
             }
-
-            if !navHidden {
-                tabBar
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .zIndex(2)
+            .fullScreenCover(isPresented: $showCamera) {
+                cameraPicker
             }
-
-            // Overlays
-            overlays
-        }
-        .animation(.easeInOut(duration: 0.15), value: navHidden)
-        .preferredColorScheme(.light)
-        .sheet(isPresented: $showUploadSheet) {
-            UploadSheetView(
-                onCamera: {
-                    showUploadSheet = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { showCamera = true }
-                },
-                onLibrary: {
-                    showUploadSheet = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { showLibrary = true }
-                },
-                onClose: { showUploadSheet = false }
-            )
-            .presentationDetents([.height(280)])
-        }
-        .fullScreenCover(isPresented: $showCamera) {
-            CameraPicker(
-                onCapture: { img in
-                    showCamera = false
-                    workflow.stageImage(StagedImage(uiImage: img))
-                },
-                onCancel: { showCamera = false }
-            )
-            .ignoresSafeArea()
-        }
-        .fullScreenCover(isPresented: $showLibrary) {
-            PhotoLibraryPicker { img in
-                showLibrary = false
-                workflow.stageImage(StagedImage(uiImage: img))
+            .fullScreenCover(isPresented: $showLibrary) {
+                libraryPicker
             }
-            .ignoresSafeArea()
-        }
-        .sheet(isPresented: stagingBinding) {
-            Group {
-                if case .staging(let imgs) = workflow.step {
-                    ImageStagingView(
-                        images: imgs,
-                        onAddMore: { stagingAddMore = true },
-                        onRemove: { workflow.removeStaged(at: $0) },
-                        onAnalyze: { workflow.startAnalysis(images: imgs) },
-                        onCancel:  { workflow.clearStaged() }
+            .sheet(isPresented: stagingBinding) {
+                stagingSheet
+            }
+            .fullScreenCover(isPresented: confirmBinding) {
+                confirmFlow
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let pendingDeletion {
+                    UndoDeleteBanner(
+                        expense: pendingDeletion.expense,
+                        isVisible: isUndoBannerVisible,
+                        onUndo: undoPendingDeletion
                     )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 8)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(AppColor.surface)
-            .interactiveDismissDisabled()
-            .presentationDetents([.height(360)])
-            .presentationDragIndicator(.hidden)
-            .sheet(isPresented: $stagingAddMore) {
-                UploadSheetView(
-                    onCamera: {
-                        stagingAddMore = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { showCamera = true }
-                    },
-                    onLibrary: {
-                        stagingAddMore = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { showLibrary = true }
-                    },
-                    onClose: { stagingAddMore = false }
-                )
-                .presentationDetents([.height(280)])
+            .sheet(item: $detailSelection) { selection in
+                expenseDetailSheet(for: selection)
             }
-        }
-        .fullScreenCover(isPresented: confirmBinding) {
-            Group {
-                if case .confirming(let groups) = workflow.step {
-                    ReceiptConfirmView(
-                        groups: groups,
-                        onConfirm: { workflow.confirmReceipt(editedGroups: $0) },
-                        onDiscard: { workflow.discardPending() }
-                    )
-                } else if case .editing(let expense, let groups) = workflow.step {
-                    ReceiptConfirmView(
-                        groups: groups,
-                        onConfirm: { workflow.saveEdit(expense: expense, editedGroups: $0) },
-                        onDiscard: { workflow.discardEdit() }
-                    )
+            .alert(loc("That doesn’t look like a receipt", "Это не похоже на чек"), isPresented: $showNotReceipt) {
+                Button(loc("Try Again", "Попробовать снова")) { showUploadSheet = true }
+                Button(loc("Cancel", "Отмена"), role: .cancel) {}
+            } message: {
+                Text(loc(
+                    "Try another photo or capture the full receipt with better lighting.",
+                    "Попробуй другое фото или сними чек целиком при лучшем освещении."
+                ))
+            }
+            .alert(loc("Something went wrong", "Что-то пошло не так"), isPresented: errorBinding, presenting: errorMsg) { _ in
+                Button(loc("OK", "ОК"), role: .cancel) {}
+            } message: { message in
+                Text(message)
+            }
+            .onChange(of: workflow.notReceiptDetected) { detected in
+                if detected {
+                    showNotReceipt = true
+                    workflow.notReceiptDetected = false
                 }
             }
-        }
-        .onChange(of: detailExpense)    { navHidden = $0 != nil }
-        .onChange(of: deleteTarget)     { navHidden = $0 != nil }
-        .onChange(of: showNotReceipt)   { navHidden = $0 }
-        .onChange(of: errorMsg)         { navHidden = $0 != nil }
-        .onChange(of: tab) {
-            if $0 != .categories { showingDetail = false }
-            if !isPageDragging { pageDragOffset = 0 }
-        }
-        .onChange(of: workflow.notReceiptDetected) { detected in
-            if detected { showNotReceipt = true; workflow.notReceiptDetected = false }
-        }
-        .onChange(of: workflow.errorMessage) { msg in
-            if let m = msg { errorMsg = m; workflow.errorMessage = nil }
-        }
-    }
-
-    // MARK: - Nav bar
-
-    private var navBar: some View {
-        HStack(alignment: .bottom) {
-            HStack(alignment: .center, spacing: 12) {
-                Image("BrandLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 52, height: 52)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Marty")
-                        .font(.system(size: 42, weight: .black))
-                        .foregroundColor(AppColor.text)
-                    Text(navSubtitle)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(AppColor.muted)
+            .onChange(of: workflow.errorMessage) { message in
+                if let message {
+                    errorMsg = message
+                    workflow.errorMessage = nil
                 }
             }
-            Spacer()
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
-        .padding(.bottom, 32)
-        .background(AppColor.bg)
-        .overlay(alignment: .bottom) {
-            Divider().background(AppColor.border)
-        }
-    }
-
-    private var navSubtitle: String {
-        switch tab {
-        case .home:       return "\(store.expenses.count) expenses"
-        case .categories:
-            if showingDetail, let cat = activeCat { return cat }
-            return "\(store.stats.usedCats.count) categories"
-        case .settings:   return "Settings"
-        }
-    }
-
-    // MARK: - Pages
-
-    private var pagerTabs: [Tab] { [.categories, .home, .settings] }
-    private var currentPageIndex: Int { pagerTabs.firstIndex(of: tab) ?? 1 }
-
-    private var pageContent: some View {
-        GeometryReader { proxy in
-            let pageWidth = max(proxy.size.width, 1)
-
-            HStack(spacing: 0) {
-                page(for: .categories)
-                    .frame(width: pageWidth)
-                    .scrollDisabled(isPageDragging)
-                page(for: .home)
-                    .frame(width: pageWidth)
-                    .scrollDisabled(isPageDragging)
-                page(for: .settings)
-                    .frame(width: pageWidth)
-                    .scrollDisabled(isPageDragging)
+            .task(id: baseCurrencyRawValue) {
+                await refreshCurrencySnapshots()
             }
-            .frame(width: pageWidth * CGFloat(pagerTabs.count), alignment: .leading)
-            .offset(x: (-CGFloat(currentPageIndex) * pageWidth) + pageDragOffset)
-            .contentShape(Rectangle())
-            .clipped()
-            .simultaneousGesture(pagerDragGesture(pageWidth: pageWidth))
+    }
+
+    private var rootContent: some View {
+        TabView(selection: $tab) {
+            homeTab
+                .tabItem { Label(Tab.home.label, systemImage: Tab.home.icon) }
+                .tag(Tab.home)
+
+            categoriesTab
+                .tabItem { Label(Tab.categories.label, systemImage: Tab.categories.icon) }
+                .tag(Tab.categories)
+
+            settingsTab
+                .tabItem { Label(Tab.settings.label, systemImage: Tab.settings.icon) }
+                .tag(Tab.settings)
         }
     }
 
-    @ViewBuilder
-    private func page(for targetTab: Tab) -> some View {
-        switch targetTab {
-        case .home:
+    private var homeTab: some View {
+        NavigationStack {
             HomeView(
                 expenses: store.expenses,
                 stats: store.stats,
                 isLoading: workflow.isLoading,
                 flash: workflow.flash,
+                isFlashVisible: workflow.isFlashVisible,
                 onScanPress: { showUploadSheet = true },
-                onExpensePress: { exp in withAnimation(.easeInOut(duration: 0.2)) { detailExpense = exp; detailCatFilter = nil } },
-                onDeletePress: { id in withAnimation(.easeInOut(duration: 0.2)) { deleteTarget = id } },
+                onManualPress: { workflow.startManualEntry() },
+                onFlashPress: selectExpense,
+                onExpensePress: selectExpense,
+                onDeletePress: requestDeleteExpense,
                 onRefresh: { store.reload() }
             )
+            .navigationTitle("Marty")
+            .navigationBarTitleDisplayMode(.large)
+        }
+    }
 
-        case .categories:
-            if showingDetail, let cat = activeCat {
+    private var categoriesTab: some View {
+        NavigationStack(path: $categoryPath) {
+            CategoriesView(
+                stats: store.stats,
+                onCategoryPress: { categoryPath.append($0) },
+                onRefresh: { store.reload() }
+            )
+            .navigationTitle(loc("Categories", "Категории"))
+            .navigationBarTitleDisplayMode(.large)
+            .navigationDestination(for: String.self) { category in
                 CategoryDetailView(
-                    category: cat,
+                    category: category,
                     expenses: store.expenses,
-                    onBack: { withAnimation { showingDetail = false } },
-                    onExpensePress: { exp, c in withAnimation(.easeInOut(duration: 0.2)) { detailExpense = exp; detailCatFilter = c } },
-                    onDeletePress: { id in withAnimation(.easeInOut(duration: 0.2)) { deleteTarget = id } }
-                )
-            } else {
-                CategoriesView(
-                    stats: store.stats,
-                    onCategoryPress: { cat in activeCat = cat; withAnimation { showingDetail = true } },
-                    onRefresh: { store.reload() }
+                    onExpensePress: { expense, filter in
+                        detailSelection = ExpenseSelection(expense: expense, categoryFilter: filter)
+                    },
+                    onDeletePress: requestDeleteExpense
                 )
             }
+        }
+    }
 
-        case .settings:
+    private var settingsTab: some View {
+        NavigationStack {
             SettingsView(
                 expenses: store.expenses,
                 stats: store.stats,
                 onClearAll: { store.clearAll() }
             )
+            .navigationTitle(loc("Settings", "Настройки"))
+            .navigationBarTitleDisplayMode(.large)
         }
     }
 
-    // MARK: - Tab bar
+    private var cameraPicker: some View {
+        CameraPicker(
+            onCapture: { image in
+                showCamera = false
+                workflow.stageImage(StagedImage(uiImage: image))
+            },
+            onCancel: { showCamera = false }
+        )
+        .ignoresSafeArea()
+    }
 
-    private var tabBar: some View {
-        VStack(spacing: 0) {
-            Divider().background(AppColor.border.opacity(0.72))
-
-            HStack(spacing: 0) {
-                ForEach(Tab.allCases, id: \.self) { t in
-                    let active = t == tab || (t == .categories && showingDetail && tab == .categories)
-                    Button {
-                        Haptics.light()
-                        if t == .categories { showingDetail = false }
-                        withAnimation(.interactiveSpring(response: 0.5, dampingFraction: 0.92)) {
-                            tab = t
-                            pageDragOffset = 0
-                        }
-                    } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: active ? t.activeIcon : t.icon)
-                                .font(.system(size: 20, weight: active ? .semibold : .regular))
-
-                            Text(t.label)
-                                .font(.system(size: 10.5, weight: active ? .semibold : .medium))
-                                .lineLimit(1)
-                        }
-                        .foregroundStyle(active ? AppColor.accent : AppColor.muted)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 8)
-                        .padding(.bottom, 9)
-                        .contentShape(Rectangle())
-                        .animation(.easeInOut(duration: 0.18), value: active)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 8)
+    private var libraryPicker: some View {
+        PhotoLibraryPicker { image in
+            showLibrary = false
+            workflow.stageImage(StagedImage(uiImage: image))
         }
-        .background {
-            BlurView(style: .systemUltraThinMaterial)
-                .overlay(AppColor.surface.opacity(0.14))
-                .ignoresSafeArea(edges: .bottom)
+        .ignoresSafeArea()
+    }
+
+    private var stagingSheet: some View {
+        Group {
+            if case .staging(let images) = workflow.step {
+                ImageStagingView(
+                    images: images,
+                    onAddMore: { stagingAddMore = true },
+                    onRemove: { workflow.removeStaged(at: $0) },
+                    onAnalyze: { workflow.startAnalysis(images: images) },
+                    onCancel: { workflow.clearStaged() }
+                )
+            }
+        }
+        .presentationDetents([.height(stagingSheetHeight), .large])
+        .presentationDragIndicator(.visible)
+        .sheet(isPresented: $stagingAddMore) {
+            uploadSheet(onClose: { stagingAddMore = false })
+                .presentationDetents([.height(uploadSheetHeight)])
         }
     }
 
-    // MARK: - Pager gesture
-
-    private func pagerDragGesture(pageWidth: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .local)
-            .onChanged { value in
-                let dx = value.translation.width
-                let dy = value.translation.height
-                let absX = abs(dx)
-                let absY = abs(dy)
-
-                // Engage pager only when horizontal intent is clear, then lock vertical scroll.
-                if !isPageDragging {
-                    guard absX > 6, absX > absY else { return }
-                    isPageDragging = true
-                }
-
-                let atFirst = currentPageIndex == 0
-                let atLast = currentPageIndex == (pagerTabs.count - 1)
-
-                var drag = dx
-                if (atFirst && dx > 0) || (atLast && dx < 0) {
-                    // Rubber-band at edges.
-                    drag = dx * 0.28
-                }
-                pageDragOffset = max(-pageWidth, min(pageWidth, drag))
+    private var confirmFlow: some View {
+        Group {
+            if case .confirming(let groups) = workflow.step {
+                ReceiptConfirmView(
+                    groups: groups,
+                    onConfirm: { workflow.confirmReceipt(editedGroups: $0) },
+                    onDiscard: { workflow.discardPending() }
+                )
+            } else if case .editing(let expense, let groups) = workflow.step {
+                ReceiptConfirmView(
+                    groups: groups,
+                    onConfirm: { workflow.saveEdit(expense: expense, editedGroups: $0) },
+                    onDiscard: { workflow.discardEdit() }
+                )
             }
-            .onEnded { value in
-                defer {
-                    isPageDragging = false
-                }
-
-                guard isPageDragging else { return }
-
-                let dx = value.translation.width
-                let projected = value.predictedEndTranslation.width
-                let threshold = pageWidth * 0.42
-                var nextIndex = currentPageIndex
-
-                if dx < -threshold || projected < -threshold {
-                    nextIndex += 1
-                } else if dx > threshold || projected > threshold {
-                    nextIndex -= 1
-                }
-
-                nextIndex = min(max(nextIndex, 0), pagerTabs.count - 1)
-
-                withAnimation(.interactiveSpring(response: 0.52, dampingFraction: 0.94)) {
-                    tab = pagerTabs[nextIndex]
-                    pageDragOffset = 0
-                }
-            }
+        }
     }
 
-    // MARK: - Overlays
+    private func uploadSheet(onClose: @escaping () -> Void) -> some View {
+        UploadSheetView(
+            onCamera: {
+                onClose()
+                presentCamera()
+            },
+            onLibrary: {
+                onClose()
+                presentLibrary()
+            },
+            onClose: onClose
+        )
+    }
 
-    @ViewBuilder
-    private var overlays: some View {
-        // Expense detail
-        if let exp = detailExpense {
-            ExpenseDetailView(
-                expense: exp,
-                categoryFilter: detailCatFilter,
-                onClose: { withAnimation(.easeInOut(duration: 0.2)) { detailExpense = nil; detailCatFilter = nil } },
-                onDelete: { id in
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        detailExpense = nil
-                        detailCatFilter = nil
-                        deleteTarget = id
-                    }
-                },
-                onEdit: { e in
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        detailExpense = nil
-                        detailCatFilter = nil
-                    }
-                    workflow.startEdit(e)
-                },
-                onCategoryPress: { cat in
-                    detailExpense = nil
-                    detailCatFilter = nil
-                    activeCat = cat
-                    showingDetail = true
-                    tab = .categories
+    private func expenseDetailSheet(for selection: ExpenseSelection) -> some View {
+        ExpenseDetailView(
+            expense: selection.expense,
+            categoryFilter: selection.categoryFilter,
+            onDelete: { id in
+                closeDetailThen {
+                    requestDeleteExpense(id: id)
                 }
-            )
-            .zIndex(5)
-            .transition(.opacity)
+            },
+            onEdit: { expense in
+                closeDetailThen {
+                    workflow.startEdit(expense)
+                }
+            },
+            onCategoryPress: { category in
+                detailSelection = nil
+                tab = .categories
+                categoryPath = [category]
+            }
+        )
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func selectExpense(_ expense: Expense) {
+        detailSelection = ExpenseSelection(expense: expense, categoryFilter: nil)
+    }
+
+    private func presentCamera() {
+        UIActionScheduler.perform(after: UIActionDelay.modalTransitionSeconds) {
+            showCamera = true
+        }
+    }
+
+    private func presentLibrary() {
+        UIActionScheduler.perform(after: UIActionDelay.modalTransitionSeconds) {
+            showLibrary = true
+        }
+    }
+
+    private func closeDetailThen(_ action: @escaping @MainActor () -> Void) {
+        detailSelection = nil
+        UIActionScheduler.perform(after: UIActionDelay.followUpActionSeconds) {
+            action()
+        }
+    }
+
+    private func requestDeleteExpense(id: String) {
+        guard let expense = store.expenses.first(where: { $0.id == id }) else { return }
+
+        deleteUndoTask?.cancel()
+
+        if detailSelection?.expense.id == id {
+            detailSelection = nil
         }
 
-        // Delete confirm
-        if let id = deleteTarget {
-            ConfirmDialog(
-                title: "Delete expense?",
-                message: "This cannot be undone.",
-                confirmLabel: "Delete",
-                confirmRole: .destructive,
-                onConfirm: {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        if detailExpense?.id == id { detailExpense = nil }
-                        store.delete(id: id)
-                        deleteTarget = nil
-                    }
-                },
-                onCancel: { withAnimation(.easeInOut(duration: 0.2)) { deleteTarget = nil } }
-            )
-            .zIndex(6)
-            .animation(.easeOut(duration: 0.15), value: deleteTarget != nil)
+        pendingDeletion = PendingDeletion(expense: expense)
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+            store.delete(id: id)
         }
 
-        // Not-a-receipt modal
-        if showNotReceipt {
-            NotReceiptModal(
-                onRetry: { showNotReceipt = false; showUploadSheet = true },
-                onClose: { showNotReceipt = false }
-            )
-            .zIndex(7)
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+            isUndoBannerVisible = true
         }
 
-        // Error modal
-        if let msg = errorMsg {
-            ErrorModal(message: msg, onClose: { errorMsg = nil })
-                .zIndex(8)
+        deleteUndoTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UIActionDelay.undoBannerLifetimeNanoseconds)
+            guard !Task.isCancelled else { return }
+
+            withAnimation(.easeInOut(duration: 0.22)) {
+                isUndoBannerVisible = false
+            }
+
+            try? await Task.sleep(nanoseconds: UIActionDelay.bannerHideAnimationNanoseconds)
+            guard !Task.isCancelled else { return }
+
+            pendingDeletion = nil
+        }
+    }
+
+    private func undoPendingDeletion() {
+        guard let pendingDeletion else { return }
+
+        deleteUndoTask?.cancel()
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+            store.add(pendingDeletion.expense)
+        }
+
+        withAnimation(.easeInOut(duration: 0.22)) {
+            isUndoBannerVisible = false
+        }
+
+        deleteUndoTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UIActionDelay.bannerHideAnimationNanoseconds)
+            guard !Task.isCancelled else { return }
+
+            self.pendingDeletion = nil
         }
     }
 }
 
-// MARK: - Not-a-receipt modal
-
-private struct NotReceiptModal: View {
-    var onRetry: () -> Void
-    var onClose: () -> Void
-
-    var body: some View {
-        ZStack {
-            AppColor.scrim.ignoresSafeArea()
-            VStack(spacing: 20) {
-                Text("🤔").font(.system(size: 48))
-                Text("Not a receipt")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(AppColor.text)
-                Text("The image doesn't appear to be a receipt or invoice.")
-                    .font(.system(size: 14))
-                    .foregroundColor(AppColor.muted)
-                    .multilineTextAlignment(.center)
-                HStack(spacing: 10) {
-                    Button("Close", action: onClose)
-                        .frame(maxWidth: .infinity).padding(12)
-                        .background(AppColor.surface)
-                        .overlay(RoundedRectangle(cornerRadius: Radii.md).stroke(AppColor.border, lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: Radii.md))
-                        .foregroundColor(AppColor.muted).fontWeight(.semibold)
-                    Button("Try Again", action: onRetry)
-                        .frame(maxWidth: .infinity).padding(12)
-                        .background(AppColor.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: Radii.md))
-                        .foregroundColor(AppColor.onAccent).fontWeight(.bold)
-                }
-            }
-            .padding(24)
-            .background(AppColor.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .padding(24)
+extension ContentView {
+    private func refreshCurrencySnapshots() async {
+        guard !store.expenses.isEmpty else {
+            store.refreshStats()
+            return
         }
+
+        await store.refreshCurrencySnapshots(
+            using: exchangeRates,
+            baseCurrency: normalizedCurrencyCode(baseCurrencyRawValue)
+        )
     }
 }
-
-// MARK: - Error modal
-
-private struct ErrorModal: View {
-    let message: String
-    var onClose: () -> Void
-
-    var body: some View {
-        ZStack {
-            AppColor.scrim.ignoresSafeArea()
-            VStack(spacing: 16) {
-                Text("⚠️").font(.system(size: 40))
-                Text("Something went wrong")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(AppColor.text)
-                Text(message)
-                    .font(.system(size: 14))
-                    .foregroundColor(AppColor.muted)
-                    .multilineTextAlignment(.center)
-                Button("OK", action: onClose)
-                    .frame(maxWidth: .infinity).padding(12)
-                    .background(AppColor.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: Radii.md))
-                    .foregroundColor(AppColor.onAccent).fontWeight(.bold)
-            }
-            .padding(24)
-            .background(AppColor.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .padding(24)
-        }
-    }
-}
-
-// MARK: - Whole app previews
 
 #Preview("App - Home") {
-    ContentView(store: .previewStore(), initialTab: .home)
+    ContentView(dependencies: .preview(), initialTab: .home)
 }
 
 #Preview("App - Categories") {
-    ContentView(store: .previewStore(), initialTab: .categories)
+    ContentView(dependencies: .preview(), initialTab: .categories)
 }
 
 #Preview("App - Settings") {
-    ContentView(store: .previewStore(), initialTab: .settings)
-}
-
-private extension ExpenseStore {
-    static func previewStore() -> ExpenseStore {
-        ExpenseStore(previewExpenses: [
-            Expense(
-                merchant: "GNC",
-                date: "2024-12-11",
-                total: 151.33,
-                category: "Pharmacy",
-                items: [
-                    ExpenseItem(name: "Creatine", quantity: 1, price: 49.99),
-                    ExpenseItem(name: "Vitamins", quantity: 1, price: 24.99),
-                    ExpenseItem(name: "Protein", quantity: 1, price: 76.35),
-                ]
-            ),
-            Expense(
-                merchant: "CVS Pharmacy",
-                date: "2022-06-06",
-                total: 8.48,
-                category: "Gifts",
-                items: [
-                    ExpenseItem(name: "Birthday Card", quantity: 1, price: 8.48),
-                ]
-            ),
-            Expense(
-                merchant: "Target",
-                date: "2021-08-19",
-                total: 21.97,
-                category: "Haircare",
-                items: [
-                    ExpenseItem(name: "Dove Shampoo", quantity: 1, price: 12.98),
-                    ExpenseItem(name: "Dove Conditioner", quantity: 1, price: 8.99),
-                ],
-                groups: [
-                    ExpenseGroup(
-                        category: "Haircare",
-                        items: [
-                            ExpenseItem(name: "Dove Shampoo", quantity: 1, price: 12.98),
-                            ExpenseItem(name: "Dove Conditioner", quantity: 1, price: 8.99),
-                        ],
-                        total: 21.97
-                    ),
-                ]
-            ),
-        ])
-    }
+    ContentView(dependencies: .preview(), initialTab: .settings)
 }

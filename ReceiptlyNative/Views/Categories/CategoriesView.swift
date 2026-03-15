@@ -5,98 +5,143 @@ struct CategoriesView: View {
     var onCategoryPress: (String) -> Void
     var onRefresh: () async -> Void
 
-    var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                SectionLabel("\(stats.usedCats.count) Active Categories")
+    private var leadingCategory: String? {
+        stats.usedCats.first
+    }
 
+    var body: some View {
+        List {
+            if let leadingCategory {
+                Section {
+                    CategoriesSummaryCard(stats: stats, featuredCategory: leadingCategory)
+                        .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 8, trailing: 20))
+                        .listRowBackground(Color.clear)
+                }
+            }
+
+            Section(stats.usedCats.isEmpty ? "" : loc("All Categories", "Все категории")) {
                 if stats.usedCats.isEmpty {
-                    Text("No categories yet.\nScan a receipt first!")
-                        .font(.system(size: 14))
-                        .foregroundColor(AppColor.muted)
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(8)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 60)
+                    EmptyStateView(
+                        systemName: "square.grid.2x2",
+                        title: loc("No categories yet", "Категорий пока нет"),
+                        message: loc(
+                            "Categories appear automatically after you save your first receipt.",
+                            "Категории появятся автоматически после сохранения первого чека."
+                        )
+                    )
+                    .listRowBackground(Color.clear)
                 } else {
-                    LazyVStack(spacing: 10) {
-                        ForEach(stats.usedCats, id: \.self) { cat in
-                            CategoryRow(
-                                cat: cat,
-                                total: stats.catTotals[cat] ?? 0,
-                                count: stats.catCounts[cat] ?? 0,
-                                totalSpent: stats.totalSpent,
-                                onPress: { onCategoryPress(cat) }
-                            )
-                        }
+                    ForEach(stats.usedCats, id: \.self) { category in
+                        CategoryRow(
+                            category: category,
+                            total: stats.catTotals[category] ?? 0,
+                            count: stats.catCounts[category] ?? 0,
+                            totalSpent: stats.totalSpent,
+                            displayCurrency: stats.displayCurrency,
+                            onPress: { onCategoryPress(category) }
+                        )
                     }
                 }
             }
-            .padding(16)
-            .padding(.bottom, 90)
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppColor.bg)
         .refreshable { await onRefresh() }
-        .background(Color.clear)
+    }
+}
+
+private struct CategoriesSummaryCard: View {
+    let stats: Stats
+    let featuredCategory: String
+
+    private var featuredInfo: CategoryInfo { categoryInfo(for: featuredCategory) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                CategoryIconView(info: featuredInfo, size: 52, cornerRadius: 18)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(loc("Categories at a glance", "Категории с первого взгляда"))
+                        .font(.headline)
+                        .foregroundStyle(AppColor.text)
+
+                    Text(localizedActiveCategoryCountText(stats.usedCats.count))
+                        .font(.subheadline)
+                        .foregroundStyle(AppColor.muted)
+                }
+
+                Spacer()
+            }
+
+            HStack(spacing: 12) {
+                SummaryChip(
+                    title: loc("Leading", "Лидер"),
+                    value: localizedCategoryName(featuredCategory),
+                    systemName: "chart.pie"
+                )
+
+                SummaryChip(
+                    title: loc("Spent", "Потрачено"),
+                    value: fmt(stats.catTotals[featuredCategory] ?? 0, currencyCode: stats.displayCurrency),
+                    systemName: "dollarsign.circle"
+                )
+            }
+        }
+        .padding(20)
+        .cardStyle(fill: AppColor.surface, stroke: AppColor.hairline)
     }
 }
 
 private struct CategoryRow: View {
-    let cat: String
+    let category: String
     let total: Double
     let count: Int
     let totalSpent: Double
+    let displayCurrency: String
     let onPress: () -> Void
 
-    private var ci: CategoryInfo { categoryInfo(for: cat) }
-    private var pct: Double { totalSpent > 0 ? (total / totalSpent) * 100 : 0 }
+    private var info: CategoryInfo { categoryInfo(for: category) }
+    private var progressValue: Double {
+        guard totalSpent > 0 else { return 0 }
+        return min(max(total / totalSpent, 0), 1)
+    }
 
     var body: some View {
         Button(action: onPress) {
-            VStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    Text(ci.emoji)
-                        .font(.system(size: 26))
-                        .frame(width: 48, height: 48)
-                        .background(ci.color.opacity(0.094))
-                        .clipShape(RoundedRectangle(cornerRadius: 15))
+                    CategoryIconView(info: info, size: 44, cornerRadius: 14)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(cat)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(AppColor.text)
-                        Text("\(count) expense\(count == 1 ? "" : "s")")
-                            .font(.system(size: 12))
-                            .foregroundColor(AppColor.muted)
+                        Text(localizedCategoryName(category))
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(AppColor.text)
+
+                        Text(localizedReceiptCountText(count))
+                            .font(.footnote)
+                            .foregroundStyle(AppColor.muted)
                     }
 
                     Spacer()
 
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(fmt(total))
-                            .font(.system(size: 17, weight: .black))
-                            .foregroundColor(ci.color)
-                        Text(String(format: "%.0f%%", pct))
-                            .font(.system(size: 11))
-                            .foregroundColor(AppColor.muted)
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(fmt(total, currencyCode: displayCurrency))
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(info.color)
+
+                        Text(localizedPercentOfTotalText(Int(progressValue * 100)))
+                            .font(.caption)
+                            .foregroundStyle(AppColor.muted)
                     }
                 }
 
-                // Progress bar
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 999)
-                            .fill(AppColor.surface)
-                            .frame(height: 5)
-                        RoundedRectangle(cornerRadius: 999)
-                            .fill(ci.color)
-                            .frame(width: geo.size.width * pct / 100, height: 5)
-                            .animation(.easeOut(duration: 0.4), value: pct)
-                    }
-                }
-                .frame(height: 5)
+                ProgressView(value: progressValue)
+                    .tint(info.color)
             }
-            .padding(16)
-            .cardStyle()
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

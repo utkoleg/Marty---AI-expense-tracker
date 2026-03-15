@@ -1,145 +1,165 @@
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     let expenses: [Expense]
     let stats: Stats
     var onClearAll: () -> Void
 
+    @AppStorage(AppPreferences.darkModeEnabledKey) private var darkModeEnabled = false
+    @AppStorage(AppPreferences.appLanguageKey) private var appLanguageRawValue = AppLanguage.english.rawValue
+    @AppStorage(AppPreferences.baseCurrencyKey) private var baseCurrencyRawValue = BaseCurrencyOption.usd.rawValue
     @State private var showClearConfirm = false
     @State private var apiKey = APIKeyStore.apiKey
     @State private var showKeySaved = false
     @State private var exportURL: URL? = nil
     @State private var showShare = false
 
-    private var totalItems: Int { expenses.reduce(0) { $0 + $1.items.count } }
-    private var avgPerReceipt: String {
-        expenses.isEmpty ? "—" : fmt(stats.totalSpent / Double(expenses.count))
+    private var totalItems: Int {
+        expenses.reduce(0) { $0 + $1.items.count }
     }
 
-    private let summaryRows: [(String, String)] = []   // built dynamically
+    private var avgPerReceipt: String {
+        expenses.isEmpty ? "—" : fmt(stats.totalSpent / Double(expenses.count), currencyCode: stats.displayCurrency)
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                // Summary stats
-                VStack(spacing: 0) {
-                    ForEach([
-                        ("Total Receipts", "\(expenses.count)"),
-                        ("Total Items",    "\(totalItems)"),
-                        ("Total Spent",    fmt(stats.totalSpent)),
-                        ("Categories",    "\(stats.usedCats.count)"),
-                        ("Avg per Receipt", expenses.isEmpty ? "—" : fmt(stats.totalSpent / Double(expenses.count))),
-                    ], id: \.0) { label, value in
-                        HStack {
-                            Text(label).font(.system(size: 15)).foregroundColor(AppColor.muted)
-                            Spacer()
-                            Text(value).font(.system(size: 15, weight: .bold)).foregroundColor(AppColor.text)
-                        }
-                        .padding(16)
-                        if label != "Avg per Receipt" {
-                            Divider().background(AppColor.border)
-                        }
-                    }
-                }
-                .cardStyle()
-
-                // Actions
-                VStack(spacing: 0) {
-                    Button {
-                        exportCSV()
-                    } label: {
-                        HStack(spacing: 10) {
-                            Text("📤")
-                            Text("Export to CSV")
-                            Spacer()
-                        }
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(expenses.isEmpty ? AppColor.muted : AppColor.accent)
-                        .padding(16)
-                    }
-                    .disabled(expenses.isEmpty)
-                    .opacity(expenses.isEmpty ? 0.5 : 1)
-
-                    Divider().background(AppColor.border)
-
-                    Button {
-                        showClearConfirm = true
-                    } label: {
-                        HStack(spacing: 10) {
-                            Text("🗑")
-                            Text("Clear All Expenses")
-                            Spacer()
-                        }
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(expenses.isEmpty ? AppColor.muted : AppColor.danger)
-                        .padding(16)
-                    }
-                    .disabled(expenses.isEmpty)
-                    .opacity(expenses.isEmpty ? 0.5 : 1)
-                }
-                .cardStyle()
-
-                // API Key configuration
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Anthropic API Key")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(AppColor.muted)
-                        .textCase(.uppercase)
-                        .kerning(0.4)
-                    SecureField("sk-ant-api03-…", text: $apiKey)
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundColor(AppColor.text)
-                        .padding(12)
-                        .background(AppColor.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: Radii.md))
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                    Button {
-                        APIKeyStore.apiKey = apiKey
-                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        showKeySaved = true
-                        Task {
-                            try? await Task.sleep(nanoseconds: 2_000_000_000)
-                            showKeySaved = false
-                        }
-                    } label: {
-                        Text(showKeySaved ? "✓ Saved" : "Save Key")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(AppColor.onAccent)
-                            .frame(maxWidth: .infinity)
-                            .padding(11)
-                            .background(showKeySaved ? AppColor.success : AppColor.accent)
-                            .clipShape(RoundedRectangle(cornerRadius: Radii.md))
-                    }
-                }
-                .padding(16)
-                .cardStyle()
-
-                // About
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("""
-                        **Marty** uses Claude AI to scan and categorize your expenses automatically.
-
-                        50 categories · Line-item extraction · Monthly charts · CSV export
-
-                        All data is stored locally on your device.
-                        """)
-                        .font(.system(size: 13))
-                        .foregroundColor(AppColor.muted)
-                        .lineSpacing(4)
-                }
-                .padding(16)
-                .cardStyle()
+        Form {
+            Section(loc("Summary", "Сводка")) {
+                LabeledContent(loc("Receipts", "Чеки"), value: "\(expenses.count)")
+                LabeledContent(loc("Items", "Позиции"), value: "\(totalItems)")
+                LabeledContent(loc("Total Spent", "Всего потрачено"), value: fmt(stats.totalSpent, currencyCode: stats.displayCurrency))
+                LabeledContent(loc("Categories", "Категории"), value: "\(stats.usedCats.count)")
+                LabeledContent(loc("Average per Receipt", "Среднее за чек"), value: avgPerReceipt)
+                LabeledContent(loc("Base Currency", "Базовая валюта"), value: normalizedCurrencyCode(baseCurrencyRawValue))
             }
-            .padding(16)
-            .padding(.bottom, 90)
+
+            Section {
+                Toggle(isOn: darkModeBinding) {
+                    Label {
+                        Text(loc("Dark Mode", "Темная тема"))
+                    } icon: {
+                        AppearanceModeIcon(isDarkMode: darkModeEnabled)
+                    }
+                }
+            } header: {
+                Text(loc("Appearance", "Оформление"))
+            } footer: {
+                Text(loc(
+                    "Switches the whole app to Apple-style dark surfaces, dynamic text contrast, and native grouped backgrounds.",
+                    "Переключает все приложение на темную тему в стиле iOS с адаптивным контрастом и системными фонами."
+                ))
+            }
+
+            Section {
+                Picker(loc("Language", "Язык"), selection: $appLanguageRawValue) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.displayName).tag(language.rawValue)
+                    }
+                }
+            } header: {
+                Text(loc("Language", "Язык"))
+            } footer: {
+                Text(loc(
+                    "Changes the app language immediately.",
+                    "Меняет язык приложения сразу."
+                ))
+            }
+
+            Section {
+                Picker(loc("Base Currency", "Базовая валюта"), selection: $baseCurrencyRawValue) {
+                    ForEach(BaseCurrencyOption.allCases) { currency in
+                        Text(currency.displayName).tag(currency.rawValue)
+                    }
+                }
+            } header: {
+                Text(loc("Currency", "Валюта"))
+            } footer: {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(loc(
+                        "Charts and totals use the base currency. Receipts in other currencies are converted using the latest available rate and still keep the original amount in parentheses.",
+                        "Графики и сводка считаются в базовой валюте. Если чек в другой валюте, приложение пересчитает его по актуальному курсу и покажет исходную сумму в скобках."
+                    ))
+
+                    Link(
+                        loc("Rates by ExchangeRate-API", "Курсы: ExchangeRate-API"),
+                        destination: URL(string: "https://www.exchangerate-api.com")!
+                    )
+                }
+            }
+
+            Section {
+                Button {
+                    exportCSV()
+                } label: {
+                    Label(loc("Export CSV", "Экспорт CSV"), systemImage: "square.and.arrow.up")
+                }
+                .disabled(expenses.isEmpty)
+
+                Button(role: .destructive) {
+                    showClearConfirm = true
+                } label: {
+                    Label(loc("Clear All Expenses", "Удалить все расходы"), systemImage: "trash")
+                }
+                .disabled(expenses.isEmpty)
+            } header: {
+                Text(loc("Data", "Данные"))
+            } footer: {
+                Text(loc(
+                    "Exports create a CSV snapshot you can share or import elsewhere.",
+                    "Экспорт создает CSV-файл, которым можно поделиться или импортировать в другое приложение."
+                ))
+            }
+
+            Section {
+                SecureField(loc("Anthropic API key", "API-ключ Anthropic"), text: $apiKey)
+                    .font(.body.monospaced())
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                Button(showKeySaved ? loc("Saved", "Сохранено") : loc("Save Key", "Сохранить ключ")) {
+                    APIKeyStore.apiKey = apiKey
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    showKeySaved = true
+
+                    UIActionScheduler.perform(after: UIActionDelay.transientStateResetSeconds) {
+                        showKeySaved = false
+                    }
+                }
+                .tint(showKeySaved ? AppColor.success : AppColor.accent)
+            } header: {
+                Text(loc("AI Scanning", "AI-сканирование"))
+            } footer: {
+                Text(loc(
+                    "The key is stored locally on this device and used only for receipt analysis.",
+                    "Ключ хранится локально на этом устройстве и используется только для анализа чеков."
+                ))
+            }
+
+            Section(loc("About Marty", "О Marty")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(loc(
+                        "Marty scans receipts with Claude, extracts line items, groups purchases into categories, and keeps your history on-device.",
+                        "Marty сканирует чеки с помощью Claude, извлекает позиции, распределяет покупки по категориям и хранит историю на устройстве."
+                    ))
+
+                    Text(loc(
+                        "The redesigned interface follows native iOS patterns so navigation, actions, and data review feel more predictable.",
+                        "Обновленный интерфейс следует нативным паттернам iOS, поэтому навигация, действия и просмотр данных ощущаются более привычно."
+                    ))
+                        .foregroundStyle(AppColor.muted)
+                }
+                .font(.subheadline)
+                .padding(.vertical, 4)
+            }
         }
-        .background(Color.clear)
-        .confirmationDialog("Clear all expenses?", isPresented: $showClearConfirm, titleVisibility: .visible) {
-            Button("Clear All", role: .destructive) { onClearAll() }
-            Button("Cancel", role: .cancel) {}
+        .scrollContentBackground(.hidden)
+        .background(AppColor.bg)
+        .confirmationDialog(loc("Clear all expenses?", "Удалить все расходы?"), isPresented: $showClearConfirm, titleVisibility: .visible) {
+            Button(loc("Clear All", "Удалить все"), role: .destructive) { onClearAll() }
+            Button(loc("Cancel", "Отмена"), role: .cancel) {}
         } message: {
-            Text("This cannot be undone.")
+            Text(loc("This cannot be undone.", "Это действие нельзя отменить."))
         }
         .sheet(isPresented: $showShare) {
             if let url = exportURL {
@@ -149,31 +169,63 @@ struct SettingsView: View {
     }
 
     private func exportCSV() {
-        let csv = ExpenseStore_csvHelper(expenses: expenses, stats: stats)
-        let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent("receiptly_export.csv")
-        try? csv.write(to: tmpURL, atomically: true, encoding: .utf8)
-        exportURL = tmpURL
+        exportURL = try? ExpenseCSVExporter.writeTemporaryCSV(expenses: expenses)
         showShare = true
     }
-}
 
-private func ExpenseStore_csvHelper(expenses: [Expense], stats: Stats) -> String {
-    var rows: [[String]] = [["Date", "Merchant", "Category", "Total", "Items"]]
-    for e in expenses {
-        let itemNames = e.items.map(\.name).joined(separator: "; ")
-        rows.append([e.date, e.merchant, e.category, String(format: "%.2f", e.total), itemNames])
+    private var darkModeBinding: Binding<Bool> {
+        Binding(
+            get: { darkModeEnabled },
+            set: { enabled in
+                withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
+                    darkModeEnabled = enabled
+                }
+            }
+        )
     }
-    return rows
-        .map { $0.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: ",") }
-        .joined(separator: "\n")
 }
 
-// MARK: - UIKit share sheet
+private struct AppearanceModeIcon: View {
+    let isDarkMode: Bool
+
+    var body: some View {
+        ZStack {
+            modeSymbol(
+                systemName: "moon.fill",
+                tint: AppColor.accent,
+                isVisible: !isDarkMode,
+                hiddenRotation: 70
+            )
+
+            modeSymbol(
+                systemName: "sun.max.fill",
+                tint: Color(uiColor: .systemYellow),
+                isVisible: isDarkMode,
+                hiddenRotation: -70
+            )
+        }
+        .frame(width: 22, height: 22)
+        .animation(.spring(response: 0.36, dampingFraction: 0.82), value: isDarkMode)
+        .accessibilityHidden(true)
+    }
+
+    private func modeSymbol(systemName: String, tint: Color, isVisible: Bool, hiddenRotation: Double) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 17, weight: .semibold))
+            .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(tint)
+            .scaleEffect(isVisible ? 1 : 0.55)
+            .rotationEffect(.degrees(isVisible ? 0 : hiddenRotation))
+            .opacity(isVisible ? 1 : 0)
+    }
+}
 
 struct ShareSheet: UIViewControllerRepresentable {
     let url: URL
+
     func makeUIViewController(context: Context) -> UIActivityViewController {
         UIActivityViewController(activityItems: [url], applicationActivities: nil)
     }
+
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

@@ -8,77 +8,96 @@ struct ImageStagingView: View {
     var onCancel: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                Button(action: { Haptics.light(); onCancel() }) { Text("Cancel") }
-                    .foregroundColor(AppColor.danger)
-                Spacer()
-                Text("\(images.count) Image\(images.count == 1 ? "" : "s") Ready")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(AppColor.text)
-                Spacer()
-                Button(action: { Haptics.light(); onAddMore() }) {
-                    Text("+ Add")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(AppColor.accent)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .padding(.bottom, 12)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(localizedPhotosReadyText(images.count))
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(AppColor.text)
 
-            Divider().background(AppColor.border)
-
-            // Image scroll
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(Array(images.enumerated()), id: \.element.id) { i, img in
-                        ZStack(alignment: .topTrailing) {
-                            Image(uiImage: img.uiImage)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 120, height: 160)
-                                .clipShape(RoundedRectangle(cornerRadius: Radii.md))
-
-                            Button {
-                                Haptics.light(); onRemove(i)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 22))
-                                    .foregroundColor(AppColor.onAccent)
-                                    .background(Circle().fill(AppColor.scrimStrong))
-                            }
-                            .offset(x: 6, y: -6)
-                        }
+                        Text(loc(
+                            "Review the images below, remove any extras, and then analyze the receipt.",
+                            "Проверь фото ниже, удали лишние и затем запусти анализ чека."
+                        ))
+                            .font(.subheadline)
+                            .foregroundStyle(AppColor.muted)
                     }
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-            }
 
-            Divider().background(AppColor.border)
+                    Button(action: {
+                        Haptics.light()
+                        onAddMore()
+                    }) {
+                        Label(loc("Add More Photos", "Добавить еще фото"), systemImage: "plus")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(AppColor.accent)
 
-            // Analyze button
-            Button(action: { Haptics.heavy(); onAnalyze() }) {
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                    Text("Analyze Receipt\(images.count > 1 ? "s" : "")")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 14) {
+                            ForEach(Array(images.enumerated()), id: \.element.id) { index, image in
+                                ZStack(alignment: .topTrailing) {
+                                    Image(uiImage: image.uiImage)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 128, height: 164)
+                                        .clipShape(RoundedRectangle(cornerRadius: Radii.lg, style: .continuous))
+
+                                    Button {
+                                        Haptics.light()
+                                        onRemove(index)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.title3)
+                                            .foregroundStyle(.white, Color.black.opacity(0.72))
+                                    }
+                                    .padding(8)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                    .padding(.bottom, 12)
                 }
-                .font(.system(size: 16, weight: .bold))
-                .foregroundColor(AppColor.onAccent)
-                .frame(maxWidth: .infinity)
-                .padding(16)
-                .background(LinearGradient(
-                    colors: [AppColor.accent, AppColor.accent2],
-                    startPoint: .leading, endPoint: .trailing
-                ))
-                .clipShape(RoundedRectangle(cornerRadius: Radii.lg))
+                .padding(20)
+                .padding(.bottom, 60)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-            .padding(.bottom, 8)
+            .background(AppColor.bg)
+            .navigationTitle(loc("Ready to Scan", "Готово к сканированию"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(loc("Cancel", "Отмена"), action: onCancel)
+                        .foregroundStyle(AppColor.danger)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 0) {
+                    Divider()
+
+                    Button(action: {
+                        Haptics.heavy()
+                        onAnalyze()
+                    }) {
+                        Label(
+                            loc(
+                                images.count > 1 ? "Analyze Receipts" : "Analyze Receipt",
+                                images.count > 1 ? "Анализировать чеки" : "Анализировать чек"
+                            ),
+                            systemImage: "sparkles"
+                        )
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(AppColor.accent)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
+                    .background(.bar)
+                }
+            }
         }
-        .background(AppColor.surface)
     }
 }
