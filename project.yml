@@ -4,6 +4,9 @@ packages:
   SwiftUIX:
     url: https://github.com/SwiftUIX/SwiftUIX
     from: 0.2.3
+  Supabase:
+    url: https://github.com/supabase/supabase-swift
+    from: 2.39.0
 
 options:
   bundleIdPrefix: com.utkoleg
@@ -14,7 +17,8 @@ options:
 
 settings:
   base:
-    SWIFT_VERSION: "5.9"
+    SUPABASE_URL: "https://ynxpdsatdwuieqncdphv.supabase.co"
+    SUPABASE_PUBLISHABLE_KEY: "sb_publishable_H2hcs3myBXKznMsqNn2T6w_ztkW1DqQ"
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
 
 targets:
@@ -42,10 +46,13 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         NSCameraUsageDescription: "Marty needs camera access to scan receipts."
         NSPhotoLibraryUsageDescription: "Marty needs photo library access to import receipt images."
+        SUPABASE_URL: $(SUPABASE_URL)
+        SUPABASE_PUBLISHABLE_KEY: $(SUPABASE_PUBLISHABLE_KEY)
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
     dependencies:
       - package: SwiftUIX
+      - package: Supabase
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.utkoleg.receiptly

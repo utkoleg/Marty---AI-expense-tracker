@@ -46,7 +46,7 @@ struct CategoriesView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(AppColor.bg)
+        .appBackground()
         .refreshable { await onRefresh() }
     }
 }

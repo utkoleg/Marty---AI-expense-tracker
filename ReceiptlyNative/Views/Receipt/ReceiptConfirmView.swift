@@ -39,7 +39,7 @@ struct ReceiptConfirmView: View {
                 header
                 content
             }
-            .background(AppColor.bg.ignoresSafeArea())
+            .background(AppBackgroundView())
 
             if let activeDrag {
                 ReceiptItemDragPreview(

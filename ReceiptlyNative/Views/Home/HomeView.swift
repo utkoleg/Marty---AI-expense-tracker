@@ -54,6 +54,7 @@ struct HomeView: View {
                     FlashResultView(
                         expense: flash,
                         isVisible: isFlashVisible,
+                        baseCurrency: stats.displayCurrency,
                         onPress: { onFlashPress(flash) }
                     )
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
@@ -95,6 +96,7 @@ struct HomeView: View {
                     ForEach(visibleRecentExpenses) { expense in
                         ExpenseRowView(
                             expense: expense,
+                            baseCurrency: stats.displayCurrency,
                             onPress: onExpensePress
                         )
                         .swipeActions(edge: .trailing) {
@@ -124,7 +126,7 @@ struct HomeView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(AppColor.bg)
+        .appBackground()
         .id(appLanguageRawValue)
         .refreshable { await onRefresh() }
     }
@@ -218,7 +220,7 @@ private struct QuickCaptureCard: View {
             }
         }
         .padding(20)
-        .cardStyle(fill: AppColor.surface, stroke: AppColor.hairline)
+        .cardStyle(fill: AppColor.elevated, stroke: AppColor.border)
     }
 }
 
@@ -293,7 +295,7 @@ private struct HomeStatsGrid: View {
             }
         }
         .padding(20)
-        .cardStyle(fill: AppColor.surface, stroke: AppColor.hairline)
+        .cardStyle(fill: AppColor.elevated, stroke: AppColor.border)
     }
 }
 

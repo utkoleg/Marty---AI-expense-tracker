@@ -26,6 +26,10 @@
 	<string>Marty needs camera access to scan receipts.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Marty needs photo library access to import receipt images.</string>
+	<key>SUPABASE_PUBLISHABLE_KEY</key>
+	<string>$(SUPABASE_PUBLISHABLE_KEY)</string>
+	<key>SUPABASE_URL</key>
+	<string>$(SUPABASE_URL)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

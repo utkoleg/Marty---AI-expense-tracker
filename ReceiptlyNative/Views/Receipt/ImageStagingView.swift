@@ -64,7 +64,7 @@ struct ImageStagingView: View {
                 .padding(20)
                 .padding(.bottom, 60)
             }
-            .background(AppColor.bg)
+            .appBackground()
             .navigationTitle(loc("Ready to Scan", "Готово к сканированию"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

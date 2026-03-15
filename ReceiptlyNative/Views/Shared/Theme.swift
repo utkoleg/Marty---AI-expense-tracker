@@ -89,6 +89,51 @@ enum AppGradient {
     }
 }
 
+struct AppBackgroundView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack {
+            AppColor.bg
+
+            Circle()
+                .fill(primaryGlowColor.opacity(colorScheme == .dark ? 0.17 : 0.24))
+                .frame(width: 300, height: 300)
+                .blur(radius: 34)
+                .offset(x: -130, y: -250)
+
+            Circle()
+                .fill(secondaryGlowColor.opacity(colorScheme == .dark ? 0.12 : 0.18))
+                .frame(width: 260, height: 260)
+                .blur(radius: 30)
+                .offset(x: 160, y: -160)
+
+            Circle()
+                .fill(primaryGlowColor.opacity(colorScheme == .dark ? 0.1 : 0.14))
+                .frame(width: 280, height: 280)
+                .blur(radius: 36)
+                .offset(x: -170, y: 320)
+        }
+        .ignoresSafeArea()
+    }
+
+    private var primaryGlowColor: Color {
+        if colorScheme == .dark {
+            return AppColor.accent
+        }
+
+        return Color(uiColor: UIColor(hex: "#0A5A3E"))
+    }
+
+    private var secondaryGlowColor: Color {
+        if colorScheme == .dark {
+            return AppColor.accent2
+        }
+
+        return Color(uiColor: UIColor(hex: "#084730"))
+    }
+}
+
 // MARK: - Corner radii
 
 enum Radii {
@@ -123,6 +168,10 @@ struct CardStyle: ViewModifier {
 extension View {
     func cardStyle(fill: Color = AppColor.elevated, stroke: Color = AppColor.border) -> some View {
         modifier(CardStyle(fill: fill, stroke: stroke))
+    }
+
+    func appBackground() -> some View {
+        background(AppBackgroundView())
     }
 
     func appSectionPadding() -> some View {

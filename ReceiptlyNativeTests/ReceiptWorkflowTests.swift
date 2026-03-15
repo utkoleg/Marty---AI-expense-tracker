@@ -69,7 +69,7 @@ final class ReceiptWorkflowTests: XCTestCase {
         }
     }
 
-    func testConfirmReceiptAddsExpenseAndShowsFlash() {
+    func testConfirmReceiptAddsExpenseAndShowsFlash() async {
         let repository = SpyExpenseRepository()
         let store = ExpenseStore(repository: repository)
         let workflow = ReceiptWorkflow(
@@ -93,12 +93,15 @@ final class ReceiptWorkflowTests: XCTestCase {
 
         XCTAssertEqual(store.expenses.count, 1)
         XCTAssertEqual(store.expenses.first?.merchant, "Target")
-        XCTAssertEqual(repository.saveCallCount, 1)
         XCTAssertEqual(workflow.step, WorkflowStep.idle)
         XCTAssertEqual(workflow.flash?.merchant, "Target")
+
+        await XCTAssertEventually {
+            repository.insertCallCount == 1
+        }
     }
 
-    func testSaveEditUpdatesExistingExpenseAndPreservesAddedAt() {
+    func testSaveEditUpdatesExistingExpenseAndPreservesAddedAt() async {
         let existing = makeExpense(
             id: "expense-1",
             merchant: "Old Merchant",
@@ -135,7 +138,10 @@ final class ReceiptWorkflowTests: XCTestCase {
         XCTAssertEqual(store.expenses.first?.addedAt, existing.addedAt)
         XCTAssertEqual(store.expenses.first?.merchant, "New Merchant")
         XCTAssertEqual(store.expenses.first?.category, "Dining")
-        XCTAssertEqual(repository.saveCallCount, 1)
         XCTAssertEqual(workflow.step, WorkflowStep.idle)
+
+        await XCTAssertEventually {
+            repository.updateCallCount >= 1
+        }
     }
 }

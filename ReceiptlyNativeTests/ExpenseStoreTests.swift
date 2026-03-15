@@ -3,7 +3,25 @@ import XCTest
 
 @MainActor
 final class ExpenseStoreTests: XCTestCase {
-    func testCRUDOperationsUpdateExpensesAndStats() {
+    private var originalBaseCurrency: String?
+
+    override func setUp() {
+        super.setUp()
+        originalBaseCurrency = UserDefaults.standard.string(forKey: AppPreferences.baseCurrencyKey)
+        UserDefaults.standard.set("USD", forKey: AppPreferences.baseCurrencyKey)
+    }
+
+    override func tearDown() {
+        if let originalBaseCurrency {
+            UserDefaults.standard.set(originalBaseCurrency, forKey: AppPreferences.baseCurrencyKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: AppPreferences.baseCurrencyKey)
+        }
+
+        super.tearDown()
+    }
+
+    func testCRUDOperationsUpdateExpensesAndStats() async {
         let repository = SpyExpenseRepository()
         let store = ExpenseStore(repository: repository)
         let groceries = makeExpense(
@@ -46,7 +64,6 @@ final class ExpenseStoreTests: XCTestCase {
 
         XCTAssertEqual(store.expenses.first?.total, 25)
         XCTAssertEqual(store.stats.totalSpent, 35)
-        XCTAssertEqual(repository.saveCallCount, 3)
 
         store.delete(id: "expense-1")
 
@@ -57,25 +74,32 @@ final class ExpenseStoreTests: XCTestCase {
 
         XCTAssertEqual(store.expenses, [])
         XCTAssertEqual(store.stats.totalSpent, 0)
-        XCTAssertEqual(repository.saveCallCount, 5)
+
+        await XCTAssertEventually {
+            repository.insertCallCount == 2 &&
+                repository.updateCallCount == 1 &&
+                repository.deleteCallCount == 1 &&
+                repository.deleteAllCallCount == 1
+        }
     }
 
-    func testReloadRefreshesFromRepository() {
+    func testReloadRefreshesFromRepository() async {
         let original = makeExpense(id: "expense-1", merchant: "Old")
         let replacement = makeExpense(id: "expense-2", merchant: "New")
         let repository = SpyExpenseRepository(initialExpenses: [original])
         let store = ExpenseStore(repository: repository)
 
         repository.storedExpenses = [replacement]
-        store.reload()
+        await store.reload()
 
         XCTAssertEqual(snapshot(store.expenses), snapshot([replacement]))
         XCTAssertEqual(store.stats.totalSpent, replacement.total)
+        XCTAssertEqual(repository.fetchCallCount, 1)
     }
 
-    func testSaveErrorDoesNotRollbackInMemoryChanges() {
+    func testWriteErrorDoesNotRollbackInMemoryChanges() async {
         let repository = SpyExpenseRepository()
-        repository.saveError = TestLocalizedError(message: "save failed")
+        repository.writeError = TestLocalizedError(message: "save failed")
         let store = ExpenseStore(repository: repository)
         let expense = makeExpense(id: "expense-1", merchant: "Target", total: 12.5)
 
@@ -84,7 +108,10 @@ final class ExpenseStoreTests: XCTestCase {
         XCTAssertEqual(snapshot(store.expenses), snapshot([expense]))
         XCTAssertEqual(store.stats.totalSpent, 12.5)
         XCTAssertEqual(repository.storedExpenses, [])
-        XCTAssertEqual(repository.saveCallCount, 1)
+
+        await XCTAssertEventually {
+            repository.insertCallCount == 1
+        }
     }
 
     func testRefreshCurrencySnapshotsUpdatesConvertedTotalsAndStats() async {
@@ -106,6 +133,64 @@ final class ExpenseStoreTests: XCTestCase {
         XCTAssertEqual(store.expenses.first?.convertedCurrency, "USD")
         XCTAssertEqual(store.expenses.first?.exchangeRate, 0.002)
         XCTAssertEqual(store.stats.totalSpent, 100)
-        XCTAssertEqual(repository.saveCallCount, 1)
+        XCTAssertEqual(repository.updateCallCount, 1)
+    }
+
+    func testRefreshCurrencySnapshotsReplacesConversionWhenBaseCurrencyChanges() async {
+        let repository = SpyExpenseRepository(initialExpenses: [
+            makeExpense(
+                id: "expense-kzt",
+                merchant: "Magnum",
+                total: 50_000,
+                currency: "KZT",
+                category: "Groceries"
+            ),
+        ])
+        let store = ExpenseStore(repository: repository)
+        let rates = PairExchangeRateService(rates: [
+            "KZT->USD": 0.002,
+            "KZT->EUR": 0.0018,
+        ])
+
+        await store.refreshCurrencySnapshots(using: rates, baseCurrency: "USD")
+
+        XCTAssertEqual(store.expenses.first?.convertedTotal, 100)
+        XCTAssertEqual(store.expenses.first?.convertedCurrency, "USD")
+        XCTAssertEqual(store.stats.totalSpent, 100)
+        XCTAssertEqual(store.stats.displayCurrency, "USD")
+
+        await store.refreshCurrencySnapshots(using: rates, baseCurrency: "EUR")
+
+        XCTAssertEqual(store.expenses.first?.convertedTotal, 90)
+        XCTAssertEqual(store.expenses.first?.convertedCurrency, "EUR")
+        XCTAssertEqual(store.expenses.first?.exchangeRate, 0.0018)
+        XCTAssertEqual(store.stats.totalSpent, 90)
+        XCTAssertEqual(store.stats.displayCurrency, "EUR")
+        XCTAssertEqual(repository.updateCallCount, 2)
+    }
+
+    func testRefreshCurrencySnapshotsDoesNotTreatOriginalAmountAsBaseOnFailedRefresh() async {
+        let repository = SpyExpenseRepository(initialExpenses: [
+            makeExpense(
+                id: "expense-kzt",
+                merchant: "Magnum",
+                total: 50_000,
+                currency: "KZT",
+                category: "Groceries"
+            ),
+        ])
+        let store = ExpenseStore(repository: repository)
+
+        await store.refreshCurrencySnapshots(using: StubExchangeRateService(outcome: .success(0.002)), baseCurrency: "USD")
+        await store.refreshCurrencySnapshots(
+            using: StubExchangeRateService(outcome: .failure(TestLocalizedError(message: "rate unavailable"))),
+            baseCurrency: "EUR"
+        )
+
+        XCTAssertEqual(store.expenses.first?.convertedTotal, 100)
+        XCTAssertEqual(store.expenses.first?.convertedCurrency, "USD")
+        XCTAssertEqual(store.stats.totalSpent, 0)
+        XCTAssertEqual(store.stats.displayCurrency, "EUR")
+        XCTAssertEqual(repository.updateCallCount, 1)
     }
 }

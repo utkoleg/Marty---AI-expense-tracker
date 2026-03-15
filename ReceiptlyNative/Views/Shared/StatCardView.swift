@@ -6,7 +6,7 @@ struct StatCardView: View {
     var sub: String = ""
     var color: Color = AppColor.accent
     var symbolName: String? = nil
-    var fill: Color = AppColor.tertiarySurface
+    var fill: Color = AppColor.elevated
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -34,6 +34,6 @@ struct StatCardView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
         .padding(16)
-        .cardStyle(fill: fill, stroke: AppColor.hairline)
+        .cardStyle(fill: fill, stroke: AppColor.border)
     }
 }

@@ -23,10 +23,12 @@ final class ExpenseStore: ObservableObject {
     @Published private(set) var expenses: [Expense] = []
     @Published private(set) var stats: Stats = Stats()
     private let repository: any ExpenseRepository
+    private var hasLoadedRemoteState = false
+    private var persistenceTask: Task<Void, Never>?
 
     init(repository: any ExpenseRepository) {
         self.repository = repository
-        expenses = repository.load()
+        expenses = repository.cachedExpenses
         stats = computeStats(expenses)
     }
 
@@ -34,28 +36,69 @@ final class ExpenseStore: ObservableObject {
 
     func add(_ expense: Expense) {
         expenses.insert(expense, at: 0)
-        persist()
+        persist(expenses)
+        enqueuePersistence {
+            do {
+                try await self.repository.insert(expense)
+            } catch {
+                AppLogger.persistence.error("Expense insert failed: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     func update(_ expense: Expense) {
         guard let idx = expenses.firstIndex(where: { $0.id == expense.id }) else { return }
         expenses[idx] = expense
-        persist()
+        persist(expenses)
+        enqueuePersistence {
+            do {
+                try await self.repository.update(expense)
+            } catch {
+                AppLogger.persistence.error("Expense update failed: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     func delete(id: String) {
         expenses.removeAll { $0.id == id }
-        persist()
+        persist(expenses)
+        enqueuePersistence {
+            do {
+                try await self.repository.delete(id: id)
+            } catch {
+                AppLogger.persistence.error("Expense delete failed: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     func clearAll() {
         expenses = []
-        persist()
+        persist(expenses)
+        enqueuePersistence {
+            do {
+                try await self.repository.deleteAll()
+            } catch {
+                AppLogger.persistence.error("Expense clear failed: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
-    func reload() {
-        expenses = repository.load()
-        stats = computeStats(expenses)
+    func loadIfNeeded() async {
+        guard !hasLoadedRemoteState else { return }
+        await reload()
+    }
+
+    func reload() async {
+        await persistenceTask?.value
+
+        do {
+            let fetchedExpenses = try await repository.fetchExpenses()
+            expenses = fetchedExpenses
+            stats = computeStats(fetchedExpenses)
+            hasLoadedRemoteState = true
+        } catch {
+            AppLogger.persistence.error("Expense fetch failed: \(String(describing: error), privacy: .public)")
+        }
     }
 
     func refreshStats() {
@@ -76,6 +119,7 @@ final class ExpenseStore: ObservableObject {
         var nextExpenses = expenses
         var quotesByPair: [String: ExchangeRateQuote] = [:]
         var didChange = false
+        var changedExpenseIDs: Set<String> = []
 
         for index in nextExpenses.indices {
             let expense = nextExpenses[index]
@@ -93,6 +137,9 @@ final class ExpenseStore: ObservableObject {
                     exchangeRate: 1,
                     effectiveAt: ISO8601DateFormatter().string(from: Date())
                 )
+                if updatedExpense != expense {
+                    changedExpenseIDs.insert(updatedExpense.id)
+                }
                 nextExpenses[index] = updatedExpense
                 continue
             }
@@ -117,6 +164,9 @@ final class ExpenseStore: ObservableObject {
                     exchangeRate: quote.rate,
                     effectiveAt: quote.effectiveAt ?? quote.fetchedAt
                 )
+                if updatedExpense != expense {
+                    changedExpenseIDs.insert(updatedExpense.id)
+                }
                 nextExpenses[index] = updatedExpense
             } catch {
                 AppLogger.currency.error(
@@ -127,45 +177,58 @@ final class ExpenseStore: ObservableObject {
         }
 
         expenses = nextExpenses
-        stats = computeStats(nextExpenses)
+        stats = computeStats(nextExpenses, baseCurrency: normalizedBase)
 
         guard didChange else { return }
 
-        do {
-            try repository.save(nextExpenses)
-        } catch {
-            AppLogger.persistence.error("Expense persistence failed: \(String(describing: error), privacy: .public)")
+        let changedExpenses = nextExpenses.filter { changedExpenseIDs.contains($0.id) }
+
+        enqueuePersistence {
+            for expense in changedExpenses {
+                do {
+                    try await self.repository.update(expense)
+                } catch {
+                    AppLogger.persistence.error("Expense currency snapshot update failed: \(String(describing: error), privacy: .public)")
+                }
+            }
         }
+
+        await persistenceTask?.value
     }
 
     // MARK: - Persistence
 
-    private func persist() {
+    private func persist(_ expenses: [Expense]) {
         stats = computeStats(expenses)
-        do {
-            try repository.save(expenses)
-        } catch {
-            AppLogger.persistence.error("Expense persistence failed: \(String(describing: error), privacy: .public)")
+    }
+
+    private func enqueuePersistence(_ operation: @escaping @MainActor () async -> Void) {
+        let previousTask = persistenceTask
+
+        persistenceTask = Task { @MainActor in
+            await previousTask?.value
+            await operation()
         }
     }
 
     // MARK: - Stats computation  (mirrors useExpenses.js useMemo exactly)
 
-    private func computeStats(_ expenses: [Expense]) -> Stats {
-        let baseCurrency = currentBaseCurrencyCode()
+    private func computeStats(_ expenses: [Expense], baseCurrency: String = currentBaseCurrencyCode()) -> Stats {
+        let normalizedBaseCurrency = normalizedCurrencyCode(baseCurrency)
         var totalSpent: Double = 0
         var catTotals: [String: Double] = [:]
         var catCounts: [String: Int] = [:]
         var monthlyTotals: [String: Double] = [:]
 
         for e in expenses {
-            let expenseTotal = e.displayTotal(for: baseCurrency)
+            let expenseTotal = e.displayedBaseAmount(for: e.total, baseCurrency: normalizedBaseCurrency) ?? 0
             totalSpent += expenseTotal
 
             if let groups = e.groups, !groups.isEmpty {
                 // Multi-category: attribute totals per group category
                 for g in groups {
-                    catTotals[g.category, default: 0] += e.convertedAmount(for: g.total, baseCurrency: baseCurrency) ?? g.total
+                    let groupTotal = e.displayedBaseAmount(for: g.total, baseCurrency: normalizedBaseCurrency) ?? 0
+                    catTotals[g.category, default: 0] += groupTotal
                 }
                 // Count expense once per category it appears in
                 let seen = Set(groups.map(\.category))
@@ -194,7 +257,7 @@ final class ExpenseStore: ObservableObject {
             topCat: topCat,
             usedCats: usedCats,
             thisMonth: currentMonthKey(),
-            displayCurrency: baseCurrency
+            displayCurrency: normalizedBaseCurrency
         )
     }
 

@@ -60,7 +60,7 @@ struct ReceiptCategorySelectionSheet: View {
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background(AppColor.bg)
+            .appBackground()
             .navigationTitle(loc("Category", "Категория"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

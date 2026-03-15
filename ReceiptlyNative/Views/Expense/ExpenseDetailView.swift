@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ExpenseDetailView: View {
     let expense: Expense
+    let baseCurrency: String
     var categoryFilter: String? = nil
     var onDelete: (String) -> Void
     var onEdit: (Expense) -> Void
@@ -18,7 +19,7 @@ struct ExpenseDetailView: View {
         NavigationStack {
             List {
                 Section {
-                    ExpenseHeroCard(expense: expense)
+                    ExpenseHeroCard(expense: expense, baseCurrency: baseCurrency)
                         .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 8, trailing: 20))
                         .listRowBackground(Color.clear)
                 }
@@ -61,7 +62,7 @@ struct ExpenseDetailView: View {
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background(AppColor.bg)
+            .appBackground()
             .navigationTitle(expense.merchant.isEmpty ? loc("Expense", "Расход") : expense.merchant)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -87,7 +88,7 @@ struct ExpenseDetailView: View {
             CategorySummaryButton(
                 category: category,
                 info: categoryInfo(for: category),
-                totalText: expense.displayAmountText(for: group.total),
+                totalText: expense.displayAmountText(for: group.total, baseCurrency: baseCurrency),
                 onPress: onCategoryPress
             )
 
@@ -128,7 +129,7 @@ struct ExpenseDetailView: View {
                     CategorySummaryButton(
                         category: group.category,
                         info: categoryInfo(for: group.category),
-                        totalText: expense.displayAmountText(for: group.total),
+                        totalText: expense.displayAmountText(for: group.total, baseCurrency: baseCurrency),
                         onPress: onCategoryPress
                     )
 
@@ -136,13 +137,13 @@ struct ExpenseDetailView: View {
                         ExpenseLineItemRow(item: item, currencyCode: expense.currency)
                     }
 
-                    LabeledContent(loc("Subtotal", "Подытог"), value: expense.displayAmountText(for: group.total))
+                    LabeledContent(loc("Subtotal", "Подытог"), value: expense.displayAmountText(for: group.total, baseCurrency: baseCurrency))
                         .font(.subheadline.weight(.semibold))
                 }
             }
 
             Section {
-                LabeledContent(loc("Total", "Итого"), value: expense.displayAmountText(for: expense.total))
+                LabeledContent(loc("Total", "Итого"), value: expense.displayAmountText(for: expense.total, baseCurrency: baseCurrency))
                     .font(.headline.weight(.semibold))
             }
         } else {
@@ -150,7 +151,7 @@ struct ExpenseDetailView: View {
                 CategorySummaryButton(
                     category: expense.category,
                     info: categoryInfoValue,
-                    totalText: expense.displayAmountText(for: expense.total),
+                    totalText: expense.displayAmountText(for: expense.total, baseCurrency: baseCurrency),
                     onPress: onCategoryPress
                 )
 
@@ -158,7 +159,7 @@ struct ExpenseDetailView: View {
                     ExpenseLineItemRow(item: item, currencyCode: expense.currency)
                 }
 
-                LabeledContent(loc("Total", "Итого"), value: expense.displayAmountText(for: expense.total))
+                LabeledContent(loc("Total", "Итого"), value: expense.displayAmountText(for: expense.total, baseCurrency: baseCurrency))
                     .font(.headline.weight(.semibold))
             }
         }
@@ -174,6 +175,7 @@ struct ExpenseDetailView: View {
 
 private struct ExpenseHeroCard: View {
     let expense: Expense
+    let baseCurrency: String
 
     private var isMultiCategory: Bool { (expense.groups?.count ?? 0) > 1 }
 
@@ -204,7 +206,7 @@ private struct ExpenseHeroCard: View {
             }
 
             HStack(spacing: 12) {
-                ExpenseTotalChip(expense: expense)
+                ExpenseTotalChip(expense: expense, baseCurrency: baseCurrency)
 
                 SummaryChip(
                     title: loc("Items", "Позиции"),
@@ -220,6 +222,7 @@ private struct ExpenseHeroCard: View {
 
 private struct ExpenseTotalChip: View {
     let expense: Expense
+    let baseCurrency: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -234,7 +237,7 @@ private struct ExpenseTotalChip: View {
             }
             .foregroundStyle(AppColor.muted)
 
-            Text(expense.displayAmountText(for: expense.total))
+            Text(expense.displayAmountText(for: expense.total, baseCurrency: baseCurrency))
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(AppColor.text)
                 .lineLimit(2)

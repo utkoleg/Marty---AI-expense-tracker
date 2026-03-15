@@ -1,13 +1,30 @@
 import Foundation
+import Supabase
 
 struct AppDependencies {
     let repository: any ExpenseRepository
     let analyzer: any ReceiptAnalyzing
     let exchangeRates: any ExchangeRateProviding
 
-    static func live() -> AppDependencies {
-        AppDependencies(
-            repository: LocalExpenseRepository(),
+    static func live(
+        authenticatedUserID: String? = nil,
+        supabase: SupabaseClient? = SupabaseService.shared
+    ) -> AppDependencies {
+        let localRepository = LocalExpenseRepository()
+        let repository: any ExpenseRepository
+
+        if let authenticatedUserID, let supabase {
+            repository = SupabaseExpenseRepository(
+                userID: authenticatedUserID,
+                remoteStore: SupabaseExpenseRemoteStore(supabase: supabase),
+                migrationSourceRepository: localRepository
+            )
+        } else {
+            repository = localRepository
+        }
+
+        return AppDependencies(
+            repository: repository,
             analyzer: AnthropicReceiptAnalyzer(),
             exchangeRates: ExchangeRateService()
         )

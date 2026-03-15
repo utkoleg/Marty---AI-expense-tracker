@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct SettingsView: View {
+    var authStore: AuthStore? = nil
     let expenses: [Expense]
     let stats: Stats
     var onClearAll: () -> Void
@@ -32,6 +33,48 @@ struct SettingsView: View {
                 LabeledContent(loc("Categories", "Категории"), value: "\(stats.usedCats.count)")
                 LabeledContent(loc("Average per Receipt", "Среднее за чек"), value: avgPerReceipt)
                 LabeledContent(loc("Base Currency", "Базовая валюта"), value: normalizedCurrencyCode(baseCurrencyRawValue))
+            }
+
+            if let authStore {
+                Section {
+                    HStack(spacing: 14) {
+                        AccountAvatarView(image: authStore.profileImage)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(authStore.displayName ?? loc("Profile", "Профиль"))
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(AppColor.text)
+
+                            Text(authStore.user?.email ?? loc("Unknown", "Неизвестно"))
+                                .font(.footnote)
+                                .foregroundStyle(AppColor.muted)
+                        }
+                    }
+
+                    if let displayName = authStore.displayName {
+                        LabeledContent(loc("Name", "Имя"), value: displayName)
+                    }
+
+                    Button(role: .destructive) {
+                        Task {
+                            await authStore.signOut()
+                        }
+                    } label: {
+                        Label(loc("Sign Out", "Выйти"), systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                    .disabled(authStore.isWorking)
+                } header: {
+                    Text(loc("Account", "Аккаунт"))
+                } footer: {
+                    if let errorMessage = authStore.errorMessage {
+                        Text(errorMessage)
+                    } else {
+                        Text(loc(
+                            "Email/password auth is handled by Supabase. Social login and magic links can be added later.",
+                            "Вход по email и паролю сейчас работает через Supabase. Социальный вход и magic link можно добавить позже."
+                        ))
+                    }
+                }
             }
 
             Section {
@@ -154,7 +197,7 @@ struct SettingsView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background(AppColor.bg)
+        .appBackground()
         .confirmationDialog(loc("Clear all expenses?", "Удалить все расходы?"), isPresented: $showClearConfirm, titleVisibility: .visible) {
             Button(loc("Clear All", "Удалить все"), role: .destructive) { onClearAll() }
             Button(loc("Cancel", "Отмена"), role: .cancel) {}
@@ -228,4 +271,32 @@ struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+private struct AccountAvatarView: View {
+    let image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "person.crop.circle.fill")
+                    .resizable()
+                    .scaledToFit()
+                    .padding(8)
+                    .foregroundStyle(AppColor.muted.opacity(0.78))
+                    .background(AppColor.tertiarySurface)
+            }
+        }
+        .frame(width: 54, height: 54)
+        .background(AppColor.tertiarySurface)
+        .clipShape(Circle())
+        .overlay(
+            Circle()
+                .stroke(AppColor.border, lineWidth: 1)
+        )
+    }
 }

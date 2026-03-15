@@ -291,7 +291,7 @@ struct MonthlyChartView: View {
                 )
             }
             .padding(20)
-            .cardStyle(fill: AppColor.surface, stroke: AppColor.hairline)
+            .cardStyle(fill: AppColor.elevated, stroke: AppColor.border)
             .id("\(appLanguageRawValue)-\(baseCurrency)")
             .animation(.spring(response: 0.28, dampingFraction: 0.88), value: selectedRange)
             .onAppear {
@@ -415,7 +415,11 @@ private func spendingTrendPoints(for range: SpendingTrendRange, expenses: [Expen
 
     let totalsByDay = Dictionary(grouping: expenses.compactMap { expense -> (Date, Double)? in
         guard let date = expenseDateFormatter.date(from: expense.date) else { return nil }
-        return (calendar.startOfDay(for: date), expense.displayTotal(for: baseCurrency))
+        guard let amount = expense.displayedBaseAmount(for: expense.total, baseCurrency: baseCurrency) else {
+            return nil
+        }
+
+        return (calendar.startOfDay(for: date), amount)
     }, by: { $0.0 }).mapValues { entries in
         entries.reduce(0) { $0 + $1.1 }
     }

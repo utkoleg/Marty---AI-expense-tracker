@@ -41,6 +41,7 @@ struct ContentView: View {
     @StateObject private var store: ExpenseStore
     @StateObject private var workflow: ReceiptWorkflow
     private let exchangeRates: any ExchangeRateProviding
+    private let authStore: AuthStore?
 
     @State private var tab: Tab = .home
     @State private var categoryPath: [String] = []
@@ -55,12 +56,13 @@ struct ContentView: View {
     @State private var errorMsg: String? = nil
     @State private var stagingAddMore = false
 
-    init(dependencies: AppDependencies = .live(), initialTab: Tab = .home) {
+    init(dependencies: AppDependencies = .live(), authStore: AuthStore? = nil, initialTab: Tab = .home) {
         let store = ExpenseStore(repository: dependencies.repository)
         self.init(
             store: store,
             analyzer: dependencies.analyzer,
             exchangeRates: dependencies.exchangeRates,
+            authStore: authStore,
             initialTab: initialTab
         )
     }
@@ -69,11 +71,13 @@ struct ContentView: View {
         store: ExpenseStore,
         analyzer: any ReceiptAnalyzing,
         exchangeRates: any ExchangeRateProviding,
+        authStore: AuthStore? = nil,
         initialTab: Tab = .home
     ) {
         _store = StateObject(wrappedValue: store)
         _workflow = StateObject(wrappedValue: ReceiptWorkflow(store: store, analyzer: analyzer, exchangeRates: exchangeRates))
         self.exchangeRates = exchangeRates
+        self.authStore = authStore
         _tab = State(initialValue: initialTab)
     }
 
@@ -179,7 +183,11 @@ struct ContentView: View {
                     workflow.errorMessage = nil
                 }
             }
+            .task {
+                await store.loadIfNeeded()
+            }
             .task(id: baseCurrencyRawValue) {
+                await store.loadIfNeeded()
                 await refreshCurrencySnapshots()
             }
     }
@@ -213,7 +221,7 @@ struct ContentView: View {
                 onFlashPress: selectExpense,
                 onExpensePress: selectExpense,
                 onDeletePress: requestDeleteExpense,
-                onRefresh: { store.reload() }
+                onRefresh: { await store.reload() }
             )
             .navigationTitle("Marty")
             .navigationBarTitleDisplayMode(.large)
@@ -225,7 +233,7 @@ struct ContentView: View {
             CategoriesView(
                 stats: store.stats,
                 onCategoryPress: { categoryPath.append($0) },
-                onRefresh: { store.reload() }
+                onRefresh: { await store.reload() }
             )
             .navigationTitle(loc("Categories", "Категории"))
             .navigationBarTitleDisplayMode(.large)
@@ -233,6 +241,7 @@ struct ContentView: View {
                 CategoryDetailView(
                     category: category,
                     expenses: store.expenses,
+                    baseCurrency: store.stats.displayCurrency,
                     onExpensePress: { expense, filter in
                         detailSelection = ExpenseSelection(expense: expense, categoryFilter: filter)
                     },
@@ -245,6 +254,7 @@ struct ContentView: View {
     private var settingsTab: some View {
         NavigationStack {
             SettingsView(
+                authStore: authStore,
                 expenses: store.expenses,
                 stats: store.stats,
                 onClearAll: { store.clearAll() }
@@ -328,6 +338,7 @@ struct ContentView: View {
     private func expenseDetailSheet(for selection: ExpenseSelection) -> some View {
         ExpenseDetailView(
             expense: selection.expense,
+            baseCurrency: store.stats.displayCurrency,
             categoryFilter: selection.categoryFilter,
             onDelete: { id in
                 closeDetailThen {

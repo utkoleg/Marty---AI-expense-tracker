@@ -3,6 +3,7 @@ import SwiftUI
 struct ExpenseRowView: View {
     let expense: Expense
     var categoryFilter: String? = nil
+    var baseCurrency: String = currentBaseCurrencyCode()
     var onPress: (Expense) -> Void
 
     private var cat: CategoryInfo { categoryInfo(for: categoryFilter ?? expense.category) }
@@ -67,7 +68,7 @@ struct ExpenseRowView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text(expense.displayAmountText(for: displayAmount))
+                    Text(expense.displayAmountText(for: displayAmount, baseCurrency: baseCurrency))
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(AppColor.text)
                         .lineLimit(2)

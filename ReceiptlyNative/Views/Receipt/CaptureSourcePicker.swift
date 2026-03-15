@@ -27,7 +27,7 @@ struct UploadSheetView: View {
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background(AppColor.bg)
+            .appBackground()
             .navigationTitle(loc("Add Receipt", "Добавить чек"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

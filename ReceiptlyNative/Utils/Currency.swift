@@ -129,17 +129,31 @@ extension Expense {
             return originalAmount
         }
 
-        guard convertedCurrency == normalizedBase,
-              let exchangeRate
-        else {
+        guard let convertedCurrency else {
             return nil
         }
 
+        let normalizedConvertedCurrency = normalizedCurrencyCode(convertedCurrency)
+        guard normalizedConvertedCurrency == normalizedBase else { return nil }
+
+        if originalAmount == total, let convertedTotal {
+            return convertedTotal
+        }
+
+        guard let exchangeRate else { return nil }
         return sanitizePriceValue(originalAmount * exchangeRate)
     }
 
+    func displayedBaseAmount(for originalAmount: Double, baseCurrency: String = currentBaseCurrencyCode()) -> Double? {
+        if let converted = convertedAmount(for: originalAmount, baseCurrency: baseCurrency) {
+            return converted
+        }
+
+        return normalizedCurrencyCode(currency) == normalizedCurrencyCode(baseCurrency) ? originalAmount : nil
+    }
+
     func displayTotal(for baseCurrency: String = currentBaseCurrencyCode()) -> Double {
-        convertedAmount(for: total, baseCurrency: baseCurrency) ?? total
+        displayedBaseAmount(for: total, baseCurrency: baseCurrency) ?? total
     }
 
     func displayAmountText(for originalAmount: Double, baseCurrency: String = currentBaseCurrencyCode()) -> String {
@@ -154,6 +168,9 @@ extension Expense {
     func usesConvertedAmount(for baseCurrency: String = currentBaseCurrencyCode()) -> Bool {
         let originalCode = normalizedCurrencyCode(currency)
         let baseCode = normalizedCurrencyCode(baseCurrency)
-        return originalCode != baseCode && convertedCurrency == baseCode && exchangeRate != nil
+        guard let convertedCurrency else { return false }
+        return originalCode != baseCode
+            && normalizedCurrencyCode(convertedCurrency) == baseCode
+            && (convertedTotal != nil || exchangeRate != nil)
     }
 }

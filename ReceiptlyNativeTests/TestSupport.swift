@@ -149,24 +149,67 @@ func XCTAssertEventually(
 
 final class SpyExpenseRepository: ExpenseRepository {
     var storedExpenses: [Expense]
-    var saveCallCount = 0
-    var saveError: Error?
+    var fetchCallCount = 0
+    var insertCallCount = 0
+    var updateCallCount = 0
+    var deleteCallCount = 0
+    var deleteAllCallCount = 0
+    var fetchError: Error?
+    var writeError: Error?
 
     init(initialExpenses: [Expense] = []) {
         storedExpenses = initialExpenses
     }
 
-    func load() -> [Expense] {
+    var cachedExpenses: [Expense] {
         storedExpenses
     }
 
-    func save(_ expenses: [Expense]) throws {
-        saveCallCount += 1
-        if let saveError {
-            throw saveError
+    func fetchExpenses() async throws -> [Expense] {
+        fetchCallCount += 1
+        if let fetchError {
+            throw fetchError
         }
 
-        storedExpenses = expenses
+        return storedExpenses
+    }
+
+    func insert(_ expense: Expense) async throws {
+        insertCallCount += 1
+        if let writeError {
+            throw writeError
+        }
+
+        storedExpenses.removeAll { $0.id == expense.id }
+        storedExpenses.insert(expense, at: 0)
+    }
+
+    func update(_ expense: Expense) async throws {
+        updateCallCount += 1
+        if let writeError {
+            throw writeError
+        }
+
+        guard let index = storedExpenses.firstIndex(where: { $0.id == expense.id }) else { return }
+        storedExpenses[index] = expense
+    }
+
+    func delete(id: String) async throws {
+        deleteCallCount += 1
+        if let writeError {
+            throw writeError
+        }
+
+        storedExpenses.removeAll { $0.id == id }
+    }
+
+    func deleteAll() async throws {
+        deleteAllCallCount += 1
+        if let writeError {
+            throw writeError
+        }
+
+        storedExpenses = []
     }
 }
 
@@ -217,6 +260,85 @@ actor StubExchangeRateService: ExchangeRateProviding {
         case .failure(let error):
             throw error
         }
+    }
+}
+
+actor PairExchangeRateService: ExchangeRateProviding {
+    private let rates: [String: Double]
+
+    init(rates: [String: Double]) {
+        self.rates = rates
+    }
+
+    func latestRate(from: String, to: String) async throws -> ExchangeRateQuote {
+        let normalizedFrom = normalizedCurrencyCode(from)
+        let normalizedTo = normalizedCurrencyCode(to)
+        let key = "\(normalizedFrom)->\(normalizedTo)"
+
+        guard let rate = rates[key] else {
+            throw ExchangeRateError.unsupportedCurrencyPair(normalizedFrom, normalizedTo)
+        }
+
+        return ExchangeRateQuote(
+            from: normalizedFrom,
+            to: normalizedTo,
+            rate: rate,
+            fetchedAt: "2026-03-14T00:00:00Z",
+            effectiveAt: "2026-03-14T00:00:00Z"
+        )
+    }
+}
+
+final class SpyExpenseRemoteStore: ExpenseRemoteStore {
+    var storedRows: [ExpenseRow]
+    var fetchCallCount = 0
+    var upsertCallCount = 0
+    var deleteCallCount = 0
+    var deleteAllCallCount = 0
+    var fetchError: Error?
+    var writeError: Error?
+
+    init(initialRows: [ExpenseRow] = []) {
+        storedRows = initialRows
+    }
+
+    func fetchRows(for userID: String) async throws -> [ExpenseRow] {
+        fetchCallCount += 1
+        if let fetchError {
+            throw fetchError
+        }
+
+        return storedRows.filter { ($0.userID ?? userID) == userID }
+    }
+
+    func upsert(_ rows: [ExpenseRow]) async throws {
+        upsertCallCount += 1
+        if let writeError {
+            throw writeError
+        }
+
+        for row in rows.reversed() {
+            storedRows.removeAll { $0.id == row.id }
+            storedRows.insert(row, at: 0)
+        }
+    }
+
+    func deleteExpense(id: String, userID: String) async throws {
+        deleteCallCount += 1
+        if let writeError {
+            throw writeError
+        }
+
+        storedRows.removeAll { $0.id == id && ($0.userID ?? userID) == userID }
+    }
+
+    func deleteAllExpenses(for userID: String) async throws {
+        deleteAllCallCount += 1
+        if let writeError {
+            throw writeError
+        }
+
+        storedRows.removeAll { ($0.userID ?? userID) == userID }
     }
 }
 

@@ -3,6 +3,7 @@ import SwiftUI
 struct FlashResultView: View {
     let expense: Expense
     let isVisible: Bool
+    var baseCurrency: String = currentBaseCurrencyCode()
     var onPress: () -> Void
 
     var body: some View {
@@ -29,7 +30,7 @@ struct FlashResultView: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text(expense.displayAmountText(for: expense.total))
+                    Text(expense.displayAmountText(for: expense.total, baseCurrency: baseCurrency))
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(AppColor.text)
                         .multilineTextAlignment(.trailing)

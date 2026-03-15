@@ -10,6 +10,7 @@ struct CatDetailRow: Identifiable {
 struct CategoryDetailView: View {
     let category: String
     let expenses: [Expense]
+    let baseCurrency: String
     var onExpensePress: (Expense, String) -> Void
     var onDeletePress: (String) -> Void
 
@@ -37,7 +38,7 @@ struct CategoryDetailView: View {
 
     private var categoryTotal: Double {
         rows.reduce(0) { partial, row in
-            partial + (row.expense.convertedAmount(for: row.total) ?? row.total)
+            partial + (row.expense.displayedBaseAmount(for: row.total, baseCurrency: baseCurrency) ?? 0)
         }
     }
 
@@ -52,6 +53,7 @@ struct CategoryDetailView: View {
                     category: category,
                     info: categoryInfoValue,
                     total: categoryTotal,
+                    baseCurrency: baseCurrency,
                     itemCount: totalItems,
                     receiptCount: rows.count
                 )
@@ -75,6 +77,7 @@ struct CategoryDetailView: View {
                         ExpenseRowView(
                             expense: row.expense,
                             categoryFilter: category,
+                            baseCurrency: baseCurrency,
                             onPress: { expense in
                                 onExpensePress(expense, category)
                             }
@@ -93,7 +96,7 @@ struct CategoryDetailView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(AppColor.bg)
+        .appBackground()
         .navigationTitle(localizedCategoryName(category))
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -103,6 +106,7 @@ private struct CategorySummaryCard: View {
     let category: String
     let info: CategoryInfo
     let total: Double
+    let baseCurrency: String
     let itemCount: Int
     let receiptCount: Int
 
@@ -127,7 +131,7 @@ private struct CategorySummaryCard: View {
             HStack(spacing: 12) {
                 SummaryChip(
                     title: loc("Spent", "Потрачено"),
-                    value: fmt(total),
+                    value: fmt(total, currencyCode: baseCurrency),
                     systemName: "dollarsign.circle"
                 )
 
