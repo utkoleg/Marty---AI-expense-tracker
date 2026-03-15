@@ -189,8 +189,33 @@ final class ExpenseStoreTests: XCTestCase {
 
         XCTAssertEqual(store.expenses.first?.convertedTotal, 100)
         XCTAssertEqual(store.expenses.first?.convertedCurrency, "USD")
-        XCTAssertEqual(store.stats.totalSpent, 0)
-        XCTAssertEqual(store.stats.displayCurrency, "EUR")
+        XCTAssertEqual(store.stats.totalSpent, 100)
+        XCTAssertEqual(store.stats.displayCurrency, "USD")
+        XCTAssertEqual(repository.updateCallCount, 1)
+    }
+
+    func testRefreshCurrencySnapshotsKeepsPreviousDisplayStateWhenBaseSwitchFails() async {
+        let repository = SpyExpenseRepository(initialExpenses: [
+            makeExpense(
+                id: "expense-usd",
+                merchant: "CVS",
+                total: 4.99,
+                currency: "USD",
+                category: "Gifts"
+            ),
+        ])
+        let store = ExpenseStore(repository: repository)
+
+        await store.refreshCurrencySnapshots(using: StubExchangeRateService(outcome: .success(1)), baseCurrency: "USD")
+        await store.refreshCurrencySnapshots(
+            using: StubExchangeRateService(outcome: .failure(TestLocalizedError(message: "rate unavailable"))),
+            baseCurrency: "KZT"
+        )
+
+        XCTAssertEqual(store.stats.totalSpent, 4.99)
+        XCTAssertEqual(store.stats.displayCurrency, "USD")
+        XCTAssertEqual(store.expenses.first?.convertedCurrency, "USD")
+        XCTAssertEqual(store.expenses.first?.convertedTotal, 4.99)
         XCTAssertEqual(repository.updateCallCount, 1)
     }
 }

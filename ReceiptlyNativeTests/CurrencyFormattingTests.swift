@@ -33,4 +33,20 @@ final class CurrencyFormattingTests: XCTestCase {
 
         XCTAssertEqual(text, "₸50,000.00")
     }
+
+    func testExpenseDisplayAmountIncludesOriginalCurrencyInParenthesesWhenBaseDiffers() {
+        let expense = makeExpense(
+            total: 4.99,
+            currency: "USD",
+            convertedTotal: 2_420,
+            convertedCurrency: "KZT",
+            exchangeRate: 485.0
+        )
+
+        let text = expense.displayAmountText(for: expense.total, baseCurrency: "KZT")
+
+        XCTAssertTrue(text.contains("₸"))
+        XCTAssertTrue(text.contains("$4.99"))
+        XCTAssertTrue(text.contains("("))
+    }
 }

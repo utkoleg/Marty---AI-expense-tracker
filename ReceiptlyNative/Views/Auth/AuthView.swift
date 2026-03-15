@@ -20,6 +20,7 @@ private enum AuthField: Hashable {
 struct AuthView: View {
     @ObservedObject var authStore: AuthStore
 
+    @AppStorage(AppPreferences.darkModeEnabledKey) private var darkModeEnabled = true
     @AppStorage(AppPreferences.appLanguageKey) private var appLanguageRawValue = AppLanguage.english.rawValue
     @AppStorage(AppPreferences.baseCurrencyKey) private var baseCurrencyRawValue = BaseCurrencyOption.usd.rawValue
     @State private var screen: AuthScreen = .welcome
@@ -47,6 +48,10 @@ struct AuthView: View {
 
     private var selectedAppLanguage: AppLanguage {
         AppLanguage(rawValue: appLanguageRawValue) ?? .english
+    }
+
+    private var selectedBaseCurrency: BaseCurrencyOption {
+        BaseCurrencyOption(rawValue: baseCurrencyRawValue) ?? .usd
     }
 
     private var sharedCredentialsValidationMessage: String? {
@@ -384,8 +389,8 @@ struct AuthView: View {
                     .foregroundStyle(AppColor.text)
 
                 Text(loc(
-                    "Pick the language and base currency you want Marty to use from the start. You can change both later in Settings.",
-                    "Выбери язык и базовую валюту, с которыми Marty будет работать с самого начала. Позже обе настройки можно изменить в Settings."
+                    "Pick the language, base currency, and theme you want Marty to use from the start. You can change all three later in Settings.",
+                    "Выбери язык, базовую валюту и тему, с которыми Marty будет работать с самого начала. Позже все три настройки можно изменить в Settings."
                 ))
                 .font(.subheadline)
                 .foregroundStyle(AppColor.muted)
@@ -412,7 +417,7 @@ struct AuthView: View {
 
                     preferenceMenuField(
                         title: loc("Currency", "Валюта"),
-                        value: baseCurrencyRawValue
+                        value: selectedBaseCurrency.rawValue
                     ) {
                         ForEach(BaseCurrencyOption.allCases) { currency in
                             Button {
@@ -428,9 +433,11 @@ struct AuthView: View {
                     }
                 }
 
+                onboardingThemeButton
+
                 Text(loc(
-                    "Charts, totals, and converted receipts will use your selected language and currency right after sign up.",
-                    "Сразу после регистрации графики, сводка и пересчитанные чеки будут использовать выбранные язык и валюту."
+                    "Charts, totals, converted receipts, and the app look will use your selected language, currency, and theme right after sign up.",
+                    "Сразу после регистрации графики, сводка, пересчитанные чеки и внешний вид приложения будут использовать выбранные язык, валюту и тему."
                 ))
                 .font(.footnote)
                 .foregroundStyle(AppColor.muted)
@@ -753,6 +760,18 @@ struct AuthView: View {
 }
 
 extension AuthView {
+    private var onboardingThemeButton: some View {
+        Button {
+            Haptics.light()
+            withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
+                darkModeEnabled.toggle()
+            }
+        } label: {
+            ThemeSelectionCard(isDarkMode: darkModeEnabled)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func authPasswordField(
         placeholder: String,
         text: Binding<String>,

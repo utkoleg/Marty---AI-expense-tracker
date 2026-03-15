@@ -55,6 +55,8 @@ struct ContentView: View {
     @State private var showNotReceipt = false
     @State private var errorMsg: String? = nil
     @State private var stagingAddMore = false
+    @State private var isRefreshingCurrency = false
+    @State private var currencyRefreshMessage: String? = nil
 
     init(dependencies: AppDependencies = .live(), authStore: AuthStore? = nil, initialTab: Tab = .home) {
         let store = ExpenseStore(repository: dependencies.repository)
@@ -257,6 +259,8 @@ struct ContentView: View {
                 authStore: authStore,
                 expenses: store.expenses,
                 stats: store.stats,
+                isRefreshingCurrency: isRefreshingCurrency,
+                currencyRefreshMessage: currencyRefreshMessage,
                 onClearAll: { store.clearAll() }
             )
             .navigationTitle(loc("Settings", "Настройки"))
@@ -441,13 +445,27 @@ extension ContentView {
     private func refreshCurrencySnapshots() async {
         guard !store.expenses.isEmpty else {
             store.refreshStats()
+            currencyRefreshMessage = nil
             return
         }
 
-        await store.refreshCurrencySnapshots(
+        isRefreshingCurrency = true
+        defer { isRefreshingCurrency = false }
+
+        let result = await store.refreshCurrencySnapshots(
             using: exchangeRates,
             baseCurrency: normalizedCurrencyCode(baseCurrencyRawValue)
         )
+
+        switch result {
+        case .updated, .noExpenses:
+            currencyRefreshMessage = nil
+        case .aborted:
+            currencyRefreshMessage = loc(
+                "Could not update the new base currency right now. Existing totals stay in the previous currency until exchange rates load.",
+                "Не удалось пересчитать новую базовую валюту прямо сейчас. Текущие суммы останутся в предыдущей валюте, пока не загрузятся курсы."
+            )
+        }
     }
 }
 

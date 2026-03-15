@@ -5,14 +5,14 @@ struct SettingsView: View {
     var authStore: AuthStore? = nil
     let expenses: [Expense]
     let stats: Stats
+    var isRefreshingCurrency = false
+    var currencyRefreshMessage: String? = nil
     var onClearAll: () -> Void
 
-    @AppStorage(AppPreferences.darkModeEnabledKey) private var darkModeEnabled = false
+    @AppStorage(AppPreferences.darkModeEnabledKey) private var darkModeEnabled = true
     @AppStorage(AppPreferences.appLanguageKey) private var appLanguageRawValue = AppLanguage.english.rawValue
     @AppStorage(AppPreferences.baseCurrencyKey) private var baseCurrencyRawValue = BaseCurrencyOption.usd.rawValue
     @State private var showClearConfirm = false
-    @State private var apiKey = APIKeyStore.apiKey
-    @State private var showKeySaved = false
     @State private var exportURL: URL? = nil
     @State private var showShare = false
 
@@ -24,17 +24,16 @@ struct SettingsView: View {
         expenses.isEmpty ? "—" : fmt(stats.totalSpent / Double(expenses.count), currencyCode: stats.displayCurrency)
     }
 
+    private var selectedLanguage: AppLanguage {
+        AppLanguage(rawValue: appLanguageRawValue) ?? .english
+    }
+
+    private var selectedBaseCurrency: BaseCurrencyOption {
+        BaseCurrencyOption(rawValue: baseCurrencyRawValue) ?? .usd
+    }
+
     var body: some View {
         Form {
-            Section(loc("Summary", "Сводка")) {
-                LabeledContent(loc("Receipts", "Чеки"), value: "\(expenses.count)")
-                LabeledContent(loc("Items", "Позиции"), value: "\(totalItems)")
-                LabeledContent(loc("Total Spent", "Всего потрачено"), value: fmt(stats.totalSpent, currencyCode: stats.displayCurrency))
-                LabeledContent(loc("Categories", "Категории"), value: "\(stats.usedCats.count)")
-                LabeledContent(loc("Average per Receipt", "Среднее за чек"), value: avgPerReceipt)
-                LabeledContent(loc("Base Currency", "Базовая валюта"), value: normalizedCurrencyCode(baseCurrencyRawValue))
-            }
-
             if let authStore {
                 Section {
                     HStack(spacing: 14) {
@@ -55,12 +54,16 @@ struct SettingsView: View {
                         LabeledContent(loc("Name", "Имя"), value: displayName)
                     }
 
-                    Button(role: .destructive) {
+                    Button {
                         Task {
                             await authStore.signOut()
                         }
                     } label: {
-                        Label(loc("Sign Out", "Выйти"), systemImage: "rectangle.portrait.and.arrow.right")
+                        SettingsActionRow(
+                            title: loc("Sign Out", "Выйти"),
+                            systemName: "rectangle.portrait.and.arrow.right",
+                            iconTint: AppColor.danger
+                        )
                     }
                     .disabled(authStore.isWorking)
                 } header: {
@@ -68,23 +71,40 @@ struct SettingsView: View {
                 } footer: {
                     if let errorMessage = authStore.errorMessage {
                         Text(errorMessage)
-                    } else {
-                        Text(loc(
-                            "Email/password auth is handled by Supabase. Social login and magic links can be added later.",
-                            "Вход по email и паролю сейчас работает через Supabase. Социальный вход и magic link можно добавить позже."
-                        ))
                     }
                 }
             }
 
             Section {
-                Toggle(isOn: darkModeBinding) {
-                    Label {
-                        Text(loc("Dark Mode", "Темная тема"))
-                    } icon: {
-                        AppearanceModeIcon(isDarkMode: darkModeEnabled)
-                    }
+                NavigationLink {
+                    SettingsSummaryView(
+                        receiptCount: expenses.count,
+                        itemCount: totalItems,
+                        totalSpent: stats.totalSpent,
+                        displayCurrency: stats.displayCurrency,
+                        categoryCount: stats.usedCats.count,
+                        averagePerReceipt: avgPerReceipt,
+                        baseCurrencyCode: normalizedCurrencyCode(baseCurrencyRawValue)
+                    )
+                } label: {
+                    SettingsNavigationRow(
+                        title: loc("Summary", "Сводка"),
+                        value: fmt(stats.totalSpent, currencyCode: stats.displayCurrency),
+                        systemName: "chart.bar.doc.horizontal"
+                    )
                 }
+            }
+
+            Section {
+                Button {
+                    Haptics.light()
+                    withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
+                        darkModeEnabled.toggle()
+                    }
+                } label: {
+                    ThemeSelectionCard(isDarkMode: darkModeEnabled, compact: true)
+                }
+                .buttonStyle(.plain)
             } header: {
                 Text(loc("Appearance", "Оформление"))
             } footer: {
@@ -95,11 +115,25 @@ struct SettingsView: View {
             }
 
             Section {
-                Picker(loc("Language", "Язык"), selection: $appLanguageRawValue) {
+                Menu {
                     ForEach(AppLanguage.allCases) { language in
-                        Text(language.displayName).tag(language.rawValue)
+                        Button {
+                            appLanguageRawValue = language.rawValue
+                        } label: {
+                            if language.rawValue == appLanguageRawValue {
+                                Label(language.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(language.displayName)
+                            }
+                        }
                     }
+                } label: {
+                    SettingsSelectionRow(
+                        title: loc("Language", "Язык"),
+                        value: selectedLanguage.displayName
+                    )
                 }
+                .disabled(isRefreshingCurrency)
             } header: {
                 Text(loc("Language", "Язык"))
             } footer: {
@@ -110,11 +144,25 @@ struct SettingsView: View {
             }
 
             Section {
-                Picker(loc("Base Currency", "Базовая валюта"), selection: $baseCurrencyRawValue) {
+                Menu {
                     ForEach(BaseCurrencyOption.allCases) { currency in
-                        Text(currency.displayName).tag(currency.rawValue)
+                        Button {
+                            baseCurrencyRawValue = currency.rawValue
+                        } label: {
+                            if currency.rawValue == baseCurrencyRawValue {
+                                Label(currency.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(currency.displayName)
+                            }
+                        }
                     }
+                } label: {
+                    SettingsSelectionRow(
+                        title: loc("Base Currency", "Базовая валюта"),
+                        value: selectedBaseCurrency.displayName
+                    )
                 }
+                .disabled(isRefreshingCurrency)
             } header: {
                 Text(loc("Currency", "Валюта"))
             } footer: {
@@ -128,6 +176,21 @@ struct SettingsView: View {
                         loc("Rates by ExchangeRate-API", "Курсы: ExchangeRate-API"),
                         destination: URL(string: "https://www.exchangerate-api.com")!
                     )
+
+                    if isRefreshingCurrency {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+
+                            Text(loc(
+                                "Recalculating totals in the new base currency.",
+                                "Пересчитываем суммы в новой базовой валюте."
+                            ))
+                        }
+                    } else if let currencyRefreshMessage {
+                        Text(currencyRefreshMessage)
+                            .foregroundStyle(AppColor.danger)
+                    }
                 }
             }
 
@@ -139,10 +202,14 @@ struct SettingsView: View {
                 }
                 .disabled(expenses.isEmpty)
 
-                Button(role: .destructive) {
+                Button {
                     showClearConfirm = true
                 } label: {
-                    Label(loc("Clear All Expenses", "Удалить все расходы"), systemImage: "trash")
+                    SettingsActionRow(
+                        title: loc("Clear All Expenses", "Удалить все расходы"),
+                        systemName: "trash",
+                        iconTint: AppColor.danger
+                    )
                 }
                 .disabled(expenses.isEmpty)
             } header: {
@@ -154,44 +221,11 @@ struct SettingsView: View {
                 ))
             }
 
-            Section {
-                SecureField(loc("Anthropic API key", "API-ключ Anthropic"), text: $apiKey)
-                    .font(.body.monospaced())
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-
-                Button(showKeySaved ? loc("Saved", "Сохранено") : loc("Save Key", "Сохранить ключ")) {
-                    APIKeyStore.apiKey = apiKey
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                    showKeySaved = true
-
-                    UIActionScheduler.perform(after: UIActionDelay.transientStateResetSeconds) {
-                        showKeySaved = false
-                    }
-                }
-                .tint(showKeySaved ? AppColor.success : AppColor.accent)
-            } header: {
-                Text(loc("AI Scanning", "AI-сканирование"))
-            } footer: {
-                Text(loc(
-                    "The key is stored locally on this device and used only for receipt analysis.",
-                    "Ключ хранится локально на этом устройстве и используется только для анализа чеков."
-                ))
-            }
-
             Section(loc("About Marty", "О Marty")) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(loc(
-                        "Marty scans receipts with Claude, extracts line items, groups purchases into categories, and keeps your history on-device.",
-                        "Marty сканирует чеки с помощью Claude, извлекает позиции, распределяет покупки по категориям и хранит историю на устройстве."
-                    ))
-
-                    Text(loc(
-                        "The redesigned interface follows native iOS patterns so navigation, actions, and data review feel more predictable.",
-                        "Обновленный интерфейс следует нативным паттернам iOS, поэтому навигация, действия и просмотр данных ощущаются более привычно."
-                    ))
-                        .foregroundStyle(AppColor.muted)
-                }
+                Text(loc(
+                    "Marty is currently in beta.",
+                    "Marty сейчас находится в бета-тесте."
+                ))
                 .font(.subheadline)
                 .padding(.vertical, 4)
             }
@@ -215,51 +249,110 @@ struct SettingsView: View {
         exportURL = try? ExpenseCSVExporter.writeTemporaryCSV(expenses: expenses)
         showShare = true
     }
+}
 
-    private var darkModeBinding: Binding<Bool> {
-        Binding(
-            get: { darkModeEnabled },
-            set: { enabled in
-                withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
-                    darkModeEnabled = enabled
-                }
+private struct SettingsSummaryView: View {
+    let receiptCount: Int
+    let itemCount: Int
+    let totalSpent: Double
+    let displayCurrency: String
+    let categoryCount: Int
+    let averagePerReceipt: String
+    let baseCurrencyCode: String
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent(loc("Receipts", "Чеки"), value: "\(receiptCount)")
+                LabeledContent(loc("Items", "Позиции"), value: "\(itemCount)")
+                LabeledContent(loc("Total Spent", "Всего потрачено"), value: fmt(totalSpent, currencyCode: displayCurrency))
+                LabeledContent(loc("Categories", "Категории"), value: "\(categoryCount)")
+                LabeledContent(loc("Average per Receipt", "Среднее за чек"), value: averagePerReceipt)
+                LabeledContent(loc("Base Currency", "Базовая валюта"), value: baseCurrencyCode)
             }
-        )
+        }
+        .scrollContentBackground(.hidden)
+        .appBackground()
+        .navigationTitle(loc("Summary", "Сводка"))
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-private struct AppearanceModeIcon: View {
-    let isDarkMode: Bool
+private struct SettingsSelectionRow: View {
+    let title: String
+    let value: String
 
     var body: some View {
-        ZStack {
-            modeSymbol(
-                systemName: "moon.fill",
-                tint: AppColor.accent,
-                isVisible: !isDarkMode,
-                hiddenRotation: 70
-            )
+        HStack(spacing: 12) {
+            Text(title)
+                .foregroundStyle(AppColor.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
 
-            modeSymbol(
-                systemName: "sun.max.fill",
-                tint: Color(uiColor: .systemYellow),
-                isVisible: isDarkMode,
-                hiddenRotation: -70
-            )
+            Spacer(minLength: 12)
+
+            HStack(spacing: 6) {
+                Text(value)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(AppColor.accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.62)
+                    .multilineTextAlignment(.trailing)
+                    .layoutPriority(1)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AppColor.accent)
+            }
         }
-        .frame(width: 22, height: 22)
-        .animation(.spring(response: 0.36, dampingFraction: 0.82), value: isDarkMode)
-        .accessibilityHidden(true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
+}
 
-    private func modeSymbol(systemName: String, tint: Color, isVisible: Bool, hiddenRotation: Double) -> some View {
-        Image(systemName: systemName)
-            .font(.system(size: 17, weight: .semibold))
-            .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(tint)
-            .scaleEffect(isVisible ? 1 : 0.55)
-            .rotationEffect(.degrees(isVisible ? 0 : hiddenRotation))
-            .opacity(isVisible ? 1 : 0)
+private struct SettingsNavigationRow: View {
+    let title: String
+    let value: String
+    let systemName: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemName)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(AppColor.accent)
+                .frame(width: 20)
+
+            Text(title)
+                .foregroundStyle(AppColor.text)
+
+            Spacer(minLength: 12)
+
+            Text(value)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(AppColor.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+    }
+}
+
+private struct SettingsActionRow: View {
+    let title: String
+    let systemName: String
+    let iconTint: Color
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemName)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(iconTint)
+                .frame(width: 20)
+
+            Text(title)
+                .foregroundStyle(AppColor.text)
+
+            Spacer()
+        }
     }
 }
 

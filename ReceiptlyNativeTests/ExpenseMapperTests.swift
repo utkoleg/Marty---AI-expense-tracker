@@ -67,6 +67,38 @@ final class ExpenseMapperTests: XCTestCase {
         XCTAssertEqual(expense.items.count, 2)
     }
 
+    func testBuildExpenseMergesDuplicateCategoriesIntoOneGroup() {
+        let expense = buildExpense(from: [
+            makeReceiptGroup(
+                merchant: "Protein Shop",
+                date: "2025-08-13",
+                currency: "KZT",
+                notes: "",
+                category: "Gym",
+                items: [
+                    ReceiptGroup.RawItem(name: "Creatine", quantity: 1, price: FlexDouble(7_940)),
+                ],
+                total: 7_940
+            ),
+            makeReceiptGroup(
+                merchant: "Protein Shop",
+                date: "2025-08-13",
+                currency: "KZT",
+                notes: "",
+                category: "Gym",
+                items: [
+                    ReceiptGroup.RawItem(name: "Whey", quantity: 1, price: FlexDouble(17_940)),
+                ],
+                total: 17_940
+            ),
+        ])
+
+        XCTAssertEqual(expense.category, "Gym")
+        XCTAssertEqual(expense.total, 25_880)
+        XCTAssertNil(expense.groups)
+        XCTAssertEqual(expense.items.map(\.name), ["Creatine", "Whey"])
+    }
+
     func testExpenseToGroupsUsesMultiCategoryGroupsWhenPresent() {
         let expense = makeExpense(
             merchant: "Target",
@@ -121,5 +153,38 @@ final class ExpenseMapperTests: XCTestCase {
         XCTAssertEqual(groups[0].category, "Dining")
         XCTAssertEqual(groups[0].items.first?.name, "Lunch")
         XCTAssertEqual(groups[0].total, 18)
+    }
+
+    func testExpenseToGroupsMergesDuplicateExpenseGroups() {
+        let expense = makeExpense(
+            merchant: "Protein Shop",
+            date: "2025-08-13",
+            total: 25_880,
+            currency: "KZT",
+            category: "Gym",
+            items: [
+                makeExpenseItem(name: "Creatine", quantity: 1, price: 7_940),
+                makeExpenseItem(name: "Whey", quantity: 1, price: 17_940),
+            ],
+            groups: [
+                makeExpenseGroup(
+                    category: "Gym",
+                    items: [makeExpenseItem(name: "Creatine", quantity: 1, price: 7_940)],
+                    total: 7_940
+                ),
+                makeExpenseGroup(
+                    category: "Gym",
+                    items: [makeExpenseItem(name: "Whey", quantity: 1, price: 17_940)],
+                    total: 17_940
+                ),
+            ]
+        )
+
+        let groups = expenseToGroups(expense)
+
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].category, "Gym")
+        XCTAssertEqual(groups[0].total, 25_880)
+        XCTAssertEqual(groups[0].items.map(\.name), ["Creatine", "Whey"])
     }
 }

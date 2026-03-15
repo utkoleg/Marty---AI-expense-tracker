@@ -69,4 +69,48 @@ final class ReceiptDraftTests: XCTestCase {
         XCTAssertEqual(draft.dateValidationMessage, "Use YYYY-MM-DD")
         XCTAssertTrue(draft.hasValidationErrors)
     }
+
+    func testInitMergesDuplicateCategoriesFromAnalyzer() {
+        let draft = ReceiptDraft(groups: [
+            makeReceiptGroup(
+                merchant: "Protein Shop",
+                date: "2025-08-13",
+                currency: "KZT",
+                notes: "",
+                category: "Gym",
+                items: [ReceiptGroup.RawItem(name: "Creatine", quantity: 1, price: FlexDouble(7_940))],
+                total: 7_940
+            ),
+            makeReceiptGroup(
+                merchant: "Protein Shop",
+                date: "2025-08-13",
+                currency: "KZT",
+                notes: "",
+                category: "Gym",
+                items: [ReceiptGroup.RawItem(name: "Whey", quantity: 1, price: FlexDouble(17_940))],
+                total: 17_940
+            ),
+        ])
+
+        XCTAssertEqual(draft.groups.count, 1)
+        XCTAssertEqual(draft.groups[0].category, "Gym")
+        XCTAssertEqual(draft.groups[0].items.map(\.name), ["Creatine", "Whey"])
+        XCTAssertEqual(draft.total, 25_880)
+    }
+
+    func testSetCategoryMergesIntoExistingCategoryGroup() {
+        var draft = ReceiptDraft(groups: [])
+        draft.groups = [
+            EditableGroup(category: "Gym", items: [EditableItem(name: "Creatine", price: 7_940)]),
+            EditableGroup(category: "Other", items: [EditableItem(name: "Whey", price: 17_940)]),
+        ]
+
+        let otherID = draft.groups[1].id
+        draft.setCategory("Gym", for: otherID)
+
+        XCTAssertEqual(draft.groups.count, 1)
+        XCTAssertEqual(draft.groups[0].category, "Gym")
+        XCTAssertEqual(draft.groups[0].items.map(\.name), ["Creatine", "Whey"])
+        XCTAssertEqual(draft.groups[0].total, 25_880)
+    }
 }

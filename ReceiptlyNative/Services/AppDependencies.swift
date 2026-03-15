@@ -25,7 +25,7 @@ struct AppDependencies {
 
         return AppDependencies(
             repository: repository,
-            analyzer: AnthropicReceiptAnalyzer(),
+            analyzer: SupabaseReceiptAnalyzer(),
             exchangeRates: ExchangeRateService()
         )
     }
@@ -41,7 +41,7 @@ struct AppDependencies {
 
 private struct PreviewReceiptAnalyzer: ReceiptAnalyzing {
     func analyze(images: [StagedImage], timeoutSeconds: Double) async throws -> [ReceiptGroup] {
-        throw AnalyzerError.noAPIKey
+        throw AnalyzerError.serviceNotConfigured
     }
 }
 

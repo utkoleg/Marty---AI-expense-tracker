@@ -8,7 +8,7 @@ private enum RootScreen: Equatable {
 
 @main
 struct ReceiptlyApp: App {
-    @AppStorage(AppPreferences.darkModeEnabledKey) private var darkModeEnabled = false
+    @AppStorage(AppPreferences.darkModeEnabledKey) private var darkModeEnabled = true
     @AppStorage(AppPreferences.appLanguageKey) private var appLanguageRawValue = AppLanguage.english.rawValue
     @StateObject private var authStore: AuthStore
 

@@ -25,12 +25,15 @@ struct CategoryDetailView: View {
     private var rows: [CatDetailRow] {
         categoryExpenses.map { expense in
             let items: [ExpenseItem]
+            let total: Double
             if let groups = expense.groups {
-                items = groups.first { $0.category == category }?.items ?? []
+                let matchingGroups = mergedExpenseGroupsByCategory(groups).filter { $0.category == category }
+                items = matchingGroups.flatMap(\.items)
+                total = matchingGroups.reduce(0) { $0 + $1.total }
             } else {
                 items = expense.items
+                total = expense.total
             }
-            let total = items.reduce(0) { $0 + $1.price }
             return CatDetailRow(id: expense.id, expense: expense, items: items, total: total)
         }
         .sorted { $0.expense.date > $1.expense.date }

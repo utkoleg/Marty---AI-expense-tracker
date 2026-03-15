@@ -7,11 +7,13 @@ struct ExpenseRowView: View {
     var onPress: (Expense) -> Void
 
     private var cat: CategoryInfo { categoryInfo(for: categoryFilter ?? expense.category) }
-    private var isMulti: Bool { (expense.groups?.count ?? 0) > 1 }
+    private var displayGroups: [ExpenseGroup] { mergedExpenseGroupsByCategory(expense.groups ?? []) }
+    private var isMulti: Bool { displayGroups.count > 1 }
+    private var extraCategoryCount: Int { max(displayGroups.count - 1, 0) }
 
     private var filteredGroup: ExpenseGroup? {
         guard let filter = categoryFilter else { return nil }
-        return expense.groups?.first { $0.category == filter }
+        return displayGroups.first { $0.category == filter }
             ?? (expense.category == filter
                 ? ExpenseGroup(category: expense.category, items: expense.items, total: expense.total)
                 : nil)
@@ -30,8 +32,8 @@ struct ExpenseRowView: View {
             return "\(dateText) · \(names?.isEmpty == false ? names! : localizedCategoryName(filter))"
         }
 
-        if isMulti, let groups = expense.groups {
-            return "\(dateText) · \(localizedCategoryList(groups.map(\.category)))"
+        if isMulti {
+            return "\(dateText) · \(localizedCategoryList(displayGroups.map(\.category)))"
         }
 
         return "\(dateText) · \(localizedCategoryName(expense.category))"
@@ -43,8 +45,8 @@ struct ExpenseRowView: View {
                 ZStack(alignment: .bottomTrailing) {
                     CategoryIconView(info: cat, size: 42, cornerRadius: 14)
 
-                    if isMulti, let count = expense.groups?.count {
-                        Text("+\(count - 1)")
+                    if isMulti {
+                        Text("+\(extraCategoryCount)")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(AppColor.accentBadgeText)
                             .padding(.horizontal, 5)

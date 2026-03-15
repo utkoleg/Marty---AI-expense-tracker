@@ -13,13 +13,14 @@ struct ExpenseDetailView: View {
     @State private var showDeleteConfirm = false
 
     private var categoryInfoValue: CategoryInfo { categoryInfo(for: expense.category) }
-    private var isMultiCategory: Bool { (expense.groups?.count ?? 0) > 1 }
+    private var displayGroups: [ExpenseGroup] { mergedExpenseGroupsByCategory(expense.groups ?? []) }
+    private var isMultiCategory: Bool { displayGroups.count > 1 }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    ExpenseHeroCard(expense: expense, baseCurrency: baseCurrency)
+                    ExpenseHeroCard(expense: expense, displayGroups: displayGroups, baseCurrency: baseCurrency)
                         .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 8, trailing: 20))
                         .listRowBackground(Color.clear)
                 }
@@ -81,7 +82,7 @@ struct ExpenseDetailView: View {
 
     @ViewBuilder
     private func filteredContent(for category: String) -> some View {
-        let group = expense.groups?.first { $0.category == category }
+        let group = displayGroups.first { $0.category == category }
             ?? ExpenseGroup(category: expense.category, items: expense.items, total: expense.total)
 
         Section(localizedCategoryName(category)) {
@@ -123,8 +124,8 @@ struct ExpenseDetailView: View {
                 )
                 .listRowBackground(Color.clear)
             }
-        } else if isMultiCategory, let groups = expense.groups {
-            ForEach(groups, id: \.category) { group in
+        } else if isMultiCategory {
+            ForEach(displayGroups, id: \.category) { group in
                 Section(localizedCategoryName(group.category)) {
                     CategorySummaryButton(
                         category: group.category,
@@ -175,16 +176,17 @@ struct ExpenseDetailView: View {
 
 private struct ExpenseHeroCard: View {
     let expense: Expense
+    let displayGroups: [ExpenseGroup]
     let baseCurrency: String
 
-    private var isMultiCategory: Bool { (expense.groups?.count ?? 0) > 1 }
+    private var isMultiCategory: Bool { displayGroups.count > 1 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 14) {
-                if isMultiCategory, let groups = expense.groups {
+                if isMultiCategory {
                     HStack(spacing: 6) {
-                        ForEach(groups.prefix(3), id: \.category) { group in
+                        ForEach(displayGroups.prefix(3), id: \.category) { group in
                             CategoryIconView(info: categoryInfo(for: group.category), size: 42, cornerRadius: 14)
                         }
                     }

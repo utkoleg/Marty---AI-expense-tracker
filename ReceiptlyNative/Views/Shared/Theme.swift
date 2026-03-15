@@ -180,6 +180,95 @@ extension View {
     }
 }
 
+struct ThemeSelectionCard: View {
+    let isDarkMode: Bool
+    var compact: Bool = false
+
+    var body: some View {
+        HStack(spacing: compact ? 14 : 16) {
+            VStack(alignment: .leading, spacing: compact ? 4 : 8) {
+                Text(loc("Theme", "Тема"))
+                    .font((compact ? Font.caption : Font.footnote).weight(.semibold))
+                    .foregroundStyle(secondaryTextColor)
+
+                Text(isDarkMode ? loc("Dark theme", "Тёмная тема") : loc("Light theme", "Светлая тема"))
+                    .font((compact ? Font.body : Font.title3).weight(.semibold))
+                    .foregroundStyle(primaryTextColor)
+
+                Text(
+                    compact
+                        ? loc("Tap to change", "Нажми, чтобы сменить")
+                        : (isDarkMode
+                            ? loc("Tap to switch to light.", "Нажми, чтобы переключить на светлую.")
+                            : loc("Tap to switch to dark.", "Нажми, чтобы переключить на тёмную."))
+                )
+                .font(compact ? .caption : .footnote)
+                .foregroundStyle(secondaryTextColor)
+            }
+
+            Spacer(minLength: compact ? 10 : 12)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: compact ? 14 : 18, style: .continuous)
+                    .fill(badgeBackground)
+                    .frame(width: compact ? 56 : 72, height: compact ? 56 : 72)
+
+                Image(systemName: isDarkMode ? "moon.stars.fill" : "sun.max.fill")
+                    .font(.system(size: compact ? 22 : 28, weight: .semibold))
+                    .foregroundStyle(badgeForeground)
+                    .scaleEffect(isDarkMode ? 1 : 0.92)
+                    .rotationEffect(.degrees(isDarkMode ? 0 : 18))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, compact ? 14 : 18)
+        .padding(.vertical, compact ? 14 : 18)
+        .background(backgroundFill, in: RoundedRectangle(cornerRadius: compact ? Radii.md : Radii.lg, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: compact ? Radii.md : Radii.lg, style: .continuous)
+                .stroke(borderColor, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: compact ? Radii.md : Radii.lg, style: .continuous))
+        .animation(.spring(response: 0.36, dampingFraction: 0.82), value: isDarkMode)
+    }
+
+    private var backgroundFill: LinearGradient {
+        if isDarkMode {
+            return LinearGradient(
+                colors: [Color(hex: "#1B2631"), Color(hex: "#101821")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+
+        return LinearGradient(
+            colors: [Color(hex: "#FFFFFF"), Color(hex: "#E9F4EE")],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var borderColor: Color {
+        isDarkMode ? AppColor.accent.opacity(0.4) : AppColor.border
+    }
+
+    private var primaryTextColor: Color {
+        isDarkMode ? .white : AppColor.text
+    }
+
+    private var secondaryTextColor: Color {
+        isDarkMode ? Color.white.opacity(0.7) : AppColor.muted
+    }
+
+    private var badgeBackground: Color {
+        isDarkMode ? AppColor.accent.opacity(0.18) : AppColor.elevated
+    }
+
+    private var badgeForeground: Color {
+        isDarkMode ? AppColor.accent : Color(hex: "#D99300")
+    }
+}
+
 struct SymbolBadge: View {
     let systemName: String
     let color: Color

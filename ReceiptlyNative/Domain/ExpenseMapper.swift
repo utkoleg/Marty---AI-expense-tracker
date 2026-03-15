@@ -1,9 +1,87 @@
 import Foundation
 
+private func receiptGroupFallbackTotal(_ group: ReceiptGroup) -> Double {
+    Array(group.items.prefix(InputLimits.maxItemsPerGroup))
+        .compactMap { raw -> Double? in
+            let name = sanitizeInlineText(raw.name, maxLength: InputLimits.itemName)
+            guard !name.isEmpty else { return nil }
+            return sanitizePriceValue(raw.resolvedPrice)
+        }
+        .reduce(0, +)
+}
+
+func mergedReceiptGroupsByCategory(_ groups: [ReceiptGroup]) -> [ReceiptGroup] {
+    var mergedByCategory: [String: ReceiptGroup] = [:]
+    var order: [String] = []
+
+    for group in groups {
+        let categoryKey = validCategory(sanitizeInlineText(group.category, maxLength: InputLimits.category))
+        let resolvedTotal = sanitizePriceValue(group.total ?? receiptGroupFallbackTotal(group))
+
+        if var existing = mergedByCategory[categoryKey] {
+            existing.items.append(contentsOf: group.items)
+            existing.total = sanitizePriceValue((existing.total ?? 0) + resolvedTotal)
+
+            if (existing.merchant ?? "").isEmpty, let merchant = group.merchant, !merchant.isEmpty {
+                existing.merchant = merchant
+            }
+            if (existing.date ?? "").isEmpty, let date = group.date, !date.isEmpty {
+                existing.date = date
+            }
+            if (existing.currency ?? "").isEmpty, let currency = group.currency, !currency.isEmpty {
+                existing.currency = currency
+            }
+            if (existing.notes ?? "").isEmpty, let notes = group.notes, !notes.isEmpty {
+                existing.notes = notes
+            }
+
+            mergedByCategory[categoryKey] = existing
+        } else {
+            order.append(categoryKey)
+            mergedByCategory[categoryKey] = ReceiptGroup(
+                merchant: group.merchant,
+                date: group.date,
+                currency: group.currency,
+                notes: group.notes,
+                category: categoryKey,
+                items: group.items,
+                total: resolvedTotal
+            )
+        }
+    }
+
+    return order.compactMap { mergedByCategory[$0] }
+}
+
+func mergedExpenseGroupsByCategory(_ groups: [ExpenseGroup]) -> [ExpenseGroup] {
+    var mergedByCategory: [String: ExpenseGroup] = [:]
+    var order: [String] = []
+
+    for group in groups {
+        let categoryKey = validCategory(sanitizeInlineText(group.category, maxLength: InputLimits.category))
+
+        if var existing = mergedByCategory[categoryKey] {
+            existing.items.append(contentsOf: group.items)
+            existing.total = sanitizePriceValue(existing.total + group.total)
+            mergedByCategory[categoryKey] = existing
+        } else {
+            order.append(categoryKey)
+            mergedByCategory[categoryKey] = ExpenseGroup(
+                id: group.id,
+                category: categoryKey,
+                items: group.items,
+                total: sanitizePriceValue(group.total)
+            )
+        }
+    }
+
+    return order.compactMap { mergedByCategory[$0] }
+}
+
 func buildExpense(from groups: [ReceiptGroup]) -> Expense {
     precondition(!groups.isEmpty, "buildExpense: groups must not be empty")
 
-    let cappedGroups = Array(groups.prefix(InputLimits.maxGroupCount))
+    let cappedGroups = Array(mergedReceiptGroupsByCategory(groups).prefix(InputLimits.maxGroupCount))
 
     let normalized: [ExpenseGroup] = cappedGroups.compactMap { group in
         let items: [ExpenseItem] = Array(group.items.prefix(InputLimits.maxItemsPerGroup)).compactMap { raw in
@@ -61,7 +139,7 @@ func buildExpense(from groups: [ReceiptGroup]) -> Expense {
 
 func expenseToGroups(_ expense: Expense) -> [ReceiptGroup] {
     if let groups = expense.groups, !groups.isEmpty {
-        return groups.map { group in
+        return mergedExpenseGroupsByCategory(groups).map { group in
             ReceiptGroup(
                 merchant: expense.merchant,
                 date: expense.date,

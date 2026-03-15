@@ -65,11 +65,12 @@ struct ReceiptDraft: Equatable {
     var groups: [EditableGroup]
 
     init(groups: [ReceiptGroup]) {
-        merchant = groups.first?.merchant ?? ""
-        date = sanitizeReceiptDate(groups.first?.date ?? todayString())
-        currency = sanitizeCurrencyCode(groups.first?.currency)
-        notes = groups.first?.notes
-        self.groups = groups.map { group in
+        let mergedGroups = mergedReceiptGroupsByCategory(groups)
+        merchant = mergedGroups.first?.merchant ?? ""
+        date = sanitizeReceiptDate(mergedGroups.first?.date ?? todayString())
+        currency = sanitizeCurrencyCode(mergedGroups.first?.currency)
+        notes = mergedGroups.first?.notes
+        self.groups = mergedGroups.map { group in
             EditableGroup(
                 category: validCategory(group.category),
                 items: group.items.map { item in
@@ -124,7 +125,15 @@ struct ReceiptDraft: Equatable {
 
     mutating func setCategory(_ category: String, for groupID: UUID) {
         guard let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
-        groups[index].category = category
+        let normalizedCategory = validCategory(sanitizeInlineText(category, maxLength: InputLimits.category))
+
+        if let existingIndex = groups.firstIndex(where: { $0.id != groupID && $0.category == normalizedCategory }) {
+            groups[existingIndex].items.append(contentsOf: groups[index].items)
+            groups.remove(at: index)
+            return
+        }
+
+        groups[index].category = normalizedCategory
     }
 
     func selectedCategory(for groupID: UUID) -> String? {
@@ -155,7 +164,7 @@ struct ReceiptDraft: Equatable {
     }
 
     func buildReceiptGroups() -> [ReceiptGroup] {
-        groups
+        let rawGroups = groups
             .filter { !$0.items.isEmpty }
             .map { group in
                 ReceiptGroup(
@@ -174,5 +183,7 @@ struct ReceiptDraft: Equatable {
                     total: sanitizePriceValue(group.total)
                 )
             }
+
+        return mergedReceiptGroupsByCategory(rawGroups)
     }
 }

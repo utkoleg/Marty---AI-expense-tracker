@@ -14,6 +14,12 @@ struct Stats {
     var displayCurrency: String = currentBaseCurrencyCode()
 }
 
+enum CurrencyRefreshResult: Equatable {
+    case updated
+    case noExpenses
+    case aborted
+}
+
 // MARK: - ExpenseStore
 
 /// Single source of truth for expenses backed by an injected repository.
@@ -105,20 +111,23 @@ final class ExpenseStore: ObservableObject {
         stats = computeStats(expenses)
     }
 
+    @discardableResult
     func refreshCurrencySnapshots(
         using exchangeRates: any ExchangeRateProviding,
         baseCurrency: String = currentBaseCurrencyCode(),
         expenseIDs: Set<String>? = nil
-    ) async {
+    ) async -> CurrencyRefreshResult {
         guard !expenses.isEmpty else {
             stats = computeStats(expenses)
-            return
+            return .noExpenses
         }
 
         let normalizedBase = normalizedCurrencyCode(baseCurrency)
+        let isGlobalBaseCurrencySwitch = expenseIDs == nil && normalizedBase != stats.displayCurrency
         var nextExpenses = expenses
         var quotesByPair: [String: ExchangeRateQuote] = [:]
         var didChange = false
+        var didFailConversion = false
         var changedExpenseIDs: Set<String> = []
 
         for index in nextExpenses.indices {
@@ -169,6 +178,7 @@ final class ExpenseStore: ObservableObject {
                 }
                 nextExpenses[index] = updatedExpense
             } catch {
+                didFailConversion = true
                 AppLogger.currency.error(
                     "Exchange rate refresh failed for \(normalizedOriginalCurrency, privacy: .public)->\(normalizedBase, privacy: .public): \(String(describing: error), privacy: .public)"
                 )
@@ -176,10 +186,17 @@ final class ExpenseStore: ObservableObject {
             }
         }
 
+        if isGlobalBaseCurrencySwitch && didFailConversion {
+            AppLogger.currency.error(
+                "Base currency switch to \(normalizedBase, privacy: .public) aborted because at least one receipt could not be converted."
+            )
+            return .aborted
+        }
+
         expenses = nextExpenses
         stats = computeStats(nextExpenses, baseCurrency: normalizedBase)
 
-        guard didChange else { return }
+        guard didChange else { return .updated }
 
         let changedExpenses = nextExpenses.filter { changedExpenseIDs.contains($0.id) }
 
@@ -194,6 +211,7 @@ final class ExpenseStore: ObservableObject {
         }
 
         await persistenceTask?.value
+        return .updated
     }
 
     // MARK: - Persistence
